@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
+    <uses-permission
+        android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+        Needed by android.media.audiofx.Visualizer to capture FFT data from the
+        in-app MediaPlayer's audio session. Used purely by BeatAnalyzer for the
+        music player's reactive bar visualiser. Denial → graceful fallback to
+        the synthetic animation, no functionality is lost.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Music playback foreground service — keeps audio alive across screens
+         and surfaces the media-style notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!--
+        Read-only Wi-Fi info for the educational "Wi-Fi Lab" concept screen
+        (SSID/BSSID/RSSI/security type). CHANGE_WIFI_STATE is required by
+        WifiManager.startScan() — the screen only reads scan results and
+        animates a clearly-simulated attack; it cannot and does not perform
+        any real Wi-Fi attack (would require root + monitor-mode firmware).
+    -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <!--
+        Audio + video calling via Jitsi Meet WebView. RECORD_AUDIO is
+        already declared above (also used by the music visualizer).
+        Both are runtime-requested at the moment the user taps the
+        call/video-call icon in a chat.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!--
+        Jitsi's audio router uses BLUETOOTH_CONNECT to enumerate paired
+        headsets so a Bluetooth earpiece becomes a routing option mid-call.
+        Without it, the SDK logs a warning and audio just stays on the
+        speaker (calls still work).
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.YoloAIO">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.YoloAIO"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <service
+            android:name=".features.music.MusicPlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Cast SDK reads this on the first CastContext.getSharedInstance() call. -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.example.yoloaio.cast.CastOptionsProvider" />
+
+        <!--
+            Firebase App Distribution SDK ships AppCompatActivity subclasses
+            (InstallActivity, etc.) that crash when they inherit our root
+            Theme.YoloAIO (which is a framework android:Theme.Material, not
+            an AppCompat descendant). Override the theme on each one via
+            tools:replace so AppCompatDelegate.onPostCreate finds the
+            colorPrimary / colorAccent attributes it expects. tools:node="merge"
+            lets us add android:theme without redeclaring the activity's
+            label / exported flags (the SDK's manifest entry stays intact).
+        -->
+        <activity
+            android:name="com.google.firebase.appdistribution.impl.InstallActivity"
+            android:theme="@style/Theme.Yolo.AppCompat"
+            tools:node="merge"
+            tools:replace="android:theme" />
+        <activity
+            android:name="com.google.firebase.appdistribution.impl.TaskCancelAndUpdateDialogActivity"
+            android:theme="@style/Theme.Yolo.AppCompat"
+            tools:node="merge"
+            tools:replace="android:theme" />
+        <activity
+            android:name="com.google.firebase.appdistribution.impl.SignInResultActivity"
+            android:theme="@style/Theme.Yolo.AppCompat"
+            tools:node="merge"
+            tools:replace="android:theme" />
+    </application>
+
+</manifest>

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"D:/NAG/Yolof4ck/YoloAIO-2026/src/features\" 2>&1)",
+      "Read(//d/NAG/Yolof4ck/YoloAIO-2026/src/features/**)",
+      "Read(//d/NAG/Yolof4ck/YoloAIO-2026/videos-proxy/api/**)",
+      "Read(//d/NAG/Yolof4ck/YoloAIO-2026/videos-proxy/**)",
+      "Bash(./gradlew assembleRelease)",
+      "Bash(keytool -list -v -keystore d:/NAG/Code/Android/YoloAIO/keystore/yolo-release.jks -alias yolo -storepass YoloAIO2026!)"
+    ]
+  }
+}

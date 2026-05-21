@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.YoloAIO" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+        Self-contained theme used only by the Cast SDK's MediaRouteButton.
+        Parent is AppCompat because MediaRouter is built against AppCompat
+        attributes (colorPrimary / colorPrimaryDark / colorAccent in the
+        non-android namespace) — the framework Theme.Material doesn't expose
+        these and MediaRouterThemeHelper crashes when it reads back `#0`.
+        Every colour the contrast checker might inspect is pinned to an
+        explicit opaque hex so OEM overlays can't override them.
+    -->
+    <style name="Theme.Yolo.MediaRouter" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:colorBackground">#FF1A1620</item>
+        <item name="android:windowBackground">#FF1A1620</item>
+        <item name="colorPrimary">#FFFF66D4</item>
+        <item name="colorPrimaryDark">#FF1A1620</item>
+        <item name="colorAccent">#FFFF66D4</item>
+        <item name="colorControlNormal">#FFE2E2E8</item>
+        <item name="colorControlActivated">#FFFF66D4</item>
+    </style>
+
+    <!--
+        General-purpose AppCompat theme used to host third-party SDK
+        activities that extend AppCompatActivity. Our app's main theme
+        (Theme.YoloAIO) parents from android:Theme.Material — not an
+        AppCompat descendant — so any SDK activity inheriting the app
+        theme crashes in AppCompatDelegate.onPostCreate with
+        "You need to use a Theme.AppCompat theme (or descendant) with
+        this activity." Apply this theme via `tools:replace="android:theme"`
+        on the SDK activity declarations in AndroidManifest.xml.
+    -->
+    <style name="Theme.Yolo.AppCompat" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">#FF1A1620</item>
+        <item name="colorPrimary">#FFB85AC1</item>
+        <item name="colorPrimaryDark">#FF1A1620</item>
+        <item name="colorAccent">#FFB85AC1</item>
+    </style>
+</resources>

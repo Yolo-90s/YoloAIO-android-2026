@@ -1,0 +1,93 @@
+{
+  "project_info": {
+    "project_number": "248053372754",
+    "firebase_url": "https://yolohome-c2ce4-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "yolohome-c2ce4",
+    "storage_bucket": "yolohome-c2ce4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:248053372754:android:6e13318dd072503cea4c8b",
+        "android_client_info": {
+          "package_name": "com.example.apartment_manager"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "248053372754-qtmfvl5mr0gjpn57rbvg098u4dbj5kqg.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.apartment_manager",
+            "certificate_hash": "8b2943bcf106d085febe556a3ae62a8f12a9896f"
+          }
+        },
+        {
+          "client_id": "248053372754-d907cu2udkp6pses8suhet8ahdkidu9i.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA2U2XMX_GgYoe1agSqv3bw0TiYsI-XXLs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "248053372754-d907cu2udkp6pses8suhet8ahdkidu9i.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:248053372754:android:ea2fbd2d0c1be5c2ea4c8b",
+        "android_client_info": {
+          "package_name": "com.example.yoloaio"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "248053372754-4dbgr58rsdt7rmmpnoib6i9388grnk49.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.yoloaio",
+            "certificate_hash": "8b2943bcf106d085febe556a3ae62a8f12a9896f"
+          }
+        },
+        {
+          "client_id": "248053372754-hcgipndbov9s314i8a4c8vs2vf7pobkd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.yoloaio",
+            "certificate_hash": "e9332f7ca15ec0a85ab15279fa97a69abe7aa846"
+          }
+        },
+        {
+          "client_id": "248053372754-d907cu2udkp6pses8suhet8ahdkidu9i.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA2U2XMX_GgYoe1agSqv3bw0TiYsI-XXLs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "248053372754-d907cu2udkp6pses8suhet8ahdkidu9i.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

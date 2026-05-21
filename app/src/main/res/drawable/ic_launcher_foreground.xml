@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!--
+        Material `AutoAwesome` sparkle icon (the one used in AuthScreen's
+        logo box). Source path is in a 24-unit viewport; scaled 3× and
+        translated to land centered inside the adaptive icon's 72×72 safe
+        zone (the inner area that no device mask will clip).
+    -->
+    <group
+        android:translateX="18"
+        android:translateY="18"
+        android:scaleX="3"
+        android:scaleY="3">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M19,9L20.25,6.25L23,5L20.25,3.75L19,1L17.75,3.75L15,5L17.75,6.25ZM9,4L6.5,9.5L1,12L6.5,14.5L9,20L11.5,14.5L17,12L11.5,9.5ZM19,15L17.75,17.75L15,19L17.75,20.25L19,23L20.25,20.25L23,19L20.25,17.75Z" />
+    </group>
+</vector>
