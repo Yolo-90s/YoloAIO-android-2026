@@ -25,6 +25,10 @@ import com.example.yoloaio.features.movies.TvDetailScreen
 import com.example.yoloaio.features.movies.TvPlayerScreen
 import com.example.yoloaio.features.music.MusicScreen
 import com.example.yoloaio.features.music.MusicSettingsScreen
+import com.example.yoloaio.features.beat.BeatAnalyserScreen
+import com.example.yoloaio.features.books.BookFavoritesScreen
+import com.example.yoloaio.features.books.BookReaderScreen
+import com.example.yoloaio.features.books.BooksScreen
 import com.example.yoloaio.features.ringtones.RingtoneFavoritesScreen
 import com.example.yoloaio.features.ringtones.RingtonesScreen
 import com.example.yoloaio.features.quotes.QuoteEditorScreen
@@ -232,6 +236,32 @@ fun AppNavGraph(
         }
         composable(Routes.RINGTONE_FAVORITES) {
             RingtoneFavoritesScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.BOOKS) {
+            BooksScreen(
+                onBack = { navController.popBackStack() },
+                onBookClick = { id -> navController.navigate(Routes.bookReader(id)) },
+                onFavoritesClick = { navController.navigate(Routes.BOOK_FAVORITES) }
+            )
+        }
+        composable(Routes.BOOK_FAVORITES) {
+            BookFavoritesScreen(
+                onBack = { navController.popBackStack() },
+                onBookClick = { id -> navController.navigate(Routes.bookReader(id)) }
+            )
+        }
+        composable(
+            route = Routes.BOOK_READER,
+            arguments = listOf(navArgument("bookId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("bookId").orEmpty()
+            BookReaderScreen(
+                bookId = id,
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(Routes.BEAT_ANALYSER) {
+            BeatAnalyserScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.WEATHER) {
             WeatherScreen(onBack = { navController.popBackStack() })

@@ -22,8 +22,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.ContentCut
+import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.FormatQuote
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Groups
@@ -101,6 +103,16 @@ private val allTiles = listOf(
         listOf(Color(0xFFE0AAFF), Color(0xFF6A1B9A))
     ),
     FeatureTile(
+        "books", "Books", "Free classics · read anywhere",
+        Icons.AutoMirrored.Rounded.MenuBook, Routes.BOOKS,
+        listOf(Color(0xFFFFB088), Color(0xFF5D4037))
+    ),
+    FeatureTile(
+        "beat_analyser", "Beat Analyser", "Noise meter · reactive visuals",
+        Icons.Rounded.Equalizer, Routes.BEAT_ANALYSER,
+        listOf(Color(0xFF42E6B4), Color(0xFF311B92))
+    ),
+    FeatureTile(
         "audio", "Audio Trimmer", "Cut & save",
         Icons.Rounded.ContentCut, Routes.AUDIO_TRIMMER,
         listOf(Color(0xFFFF7AB6), Color(0xFFB85AC1))
@@ -135,6 +147,8 @@ fun HomeScreen(
             "movies" -> config.showMoviesMenu
             "wallpaper" -> config.showWallpapersMenu
             "weather" -> config.showWeatherMenu
+            "books" -> config.showBooksMenu
+            "beat_analyser" -> config.showBeatAnalyserMenu
             else -> true
         }
     }

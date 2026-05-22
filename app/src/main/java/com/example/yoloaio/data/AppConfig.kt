@@ -9,6 +9,8 @@ data class AppConfig(
     val showSettingsMenu: Boolean = true,
     val showWallpapersMenu: Boolean = true,
     val showWeatherMenu: Boolean = true,
+    val showBooksMenu: Boolean = true,
+    val showBeatAnalyserMenu: Boolean = true,
     val unsplashAccessKey: String = "",
     val unsplashSecretKey: String = "",
     val wallpapersUrl: String = "",

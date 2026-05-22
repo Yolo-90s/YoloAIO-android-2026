@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /** What happens when the current track finishes. */
@@ -66,6 +67,14 @@ class MusicPlayer private constructor(private val context: Context) {
      * the song the user is actually hearing.
      */
     val audioSessionId: Int get() = player.audioSessionId
+
+    // ── Audio post-processing chain ────────────────────────────────
+    // Lazy-attached on first play. AudioEffects need a valid session
+    // id; the session is technically usable from MediaPlayer
+    // construction, but some OEMs only assign a real id once the
+    // first datasource is set, so we defer attachment to startTrack().
+    private val effects: MusicEffects by lazy { MusicEffects(player.audioSessionId) }
+    private var effectsAttached = false
 
     private val player: MediaPlayer = MediaPlayer().apply {
         setAudioAttributes(
@@ -124,6 +133,10 @@ class MusicPlayer private constructor(private val context: Context) {
         // keeps the process alive when the user navigates away or backgrounds
         // the app. The service is also responsible for the media notification.
         MusicPlaybackService.ensureStarted(context)
+        // Attach the DSP chain on first play and start observing the
+        // effect preferences. Repeated calls are no-ops (effectsAttached
+        // gates the work).
+        attachEffectsIfNeeded()
         prepareJob = scope.launch {
             try {
                 val rawUrl = resolveStreamUrl?.invoke(track)
@@ -287,8 +300,45 @@ class MusicPlayer private constructor(private val context: Context) {
         }
     }
 
+    /**
+     * Attach the audio post-processing chain (equalizer + bass + virtualizer
+     * + loudness) and subscribe to the user's saved settings. Idempotent —
+     * the `effectsAttached` flag means repeated startTrack() calls don't
+     * spin up duplicate collectors.
+     */
+    private fun attachEffectsIfNeeded() {
+        if (effectsAttached) return
+        if (player.audioSessionId == 0) return
+        effects.attach()
+        effectsAttached = true
+        val store = MusicEffectsPreferences.get(context)
+        scope.launch {
+            store.settings.collectLatest { s ->
+                // Apply every published change immediately. Effects
+                // disabled state still applies a flat preset + 0 strengths
+                // so toggling back off snaps the sound back to neutral.
+                effects.setEnabled(s.enabled)
+                if (s.enabled) {
+                    effects.setPreset(s.preset)
+                    effects.setBassStrength(s.bassStrength)
+                    effects.setVirtualizerStrength(s.virtualizerStrength)
+                    effects.setLoudnessGainMb(s.loudnessGainMb)
+                } else {
+                    effects.setPreset(EqPreset.Flat)
+                    effects.setBassStrength(0)
+                    effects.setVirtualizerStrength(0)
+                    effects.setLoudnessGainMb(0)
+                }
+            }
+        }
+    }
+
     fun release() {
         scope.cancel()
+        try {
+            effects.release()
+        } catch (_: Exception) {
+        }
         try {
             player.release()
         } catch (_: Exception) {
@@ -297,6 +347,7 @@ class MusicPlayer private constructor(private val context: Context) {
         isPrepared = false
         isLoading = false
         current = null
+        effectsAttached = false
         synchronized(MusicPlayer) { INSTANCE = null }
     }
 
