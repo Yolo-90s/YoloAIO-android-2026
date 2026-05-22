@@ -1116,6 +1116,7 @@ private fun MaxPlayer(
                     barCount = 72,
                     innerRadiusFraction = 0.72f,
                     liveBands = analyzer.bandMagnitudes,
+                    pulse = analyzer.pulse,
                     modifier = Modifier.fillMaxSize()
                 )
                 Box(

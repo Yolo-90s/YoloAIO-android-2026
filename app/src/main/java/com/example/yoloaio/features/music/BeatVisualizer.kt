@@ -32,7 +32,8 @@ import kotlin.random.Random
  *  - otherwise → synthetic animation
  *
  * Bass region (low FFT bins) gets a 1.6× amplitude boost so kicks land
- * harder than mid/high content.
+ * harder than mid/high content. The optional `pulse` parameter lifts
+ * every bar uniformly on each detected drum onset.
  */
 @Composable
 fun BeatVisualizer(
@@ -40,10 +41,11 @@ fun BeatVisualizer(
     color: Color,
     modifier: Modifier = Modifier,
     barCount: Int = 36,
-    liveBands: FloatArray? = null
+    liveBands: FloatArray? = null,
+    pulse: Float = 0f
 ) {
     if (liveBands != null && liveBands.isNotEmpty()) {
-        LiveLinearBars(liveBands, isPlaying, color, modifier, barCount)
+        LiveLinearBars(liveBands, isPlaying, color, modifier, barCount, pulse)
     } else {
         SyntheticLinearBars(isPlaying, color, modifier, barCount)
     }
@@ -57,6 +59,10 @@ fun BeatVisualizer(
  * Put a circular Box (album art clipped to CircleShape) at the centre of
  * the same parent Box, sized so its diameter matches inner radius × 2,
  * and the bars will frame it nicely.
+ *
+ * The optional `pulse` parameter pushes the ring outward by up to ~6% of
+ * the outer radius on each drum onset, making the visualiser breathe in
+ * time with the beat.
  */
 @Composable
 fun CircularBeatVisualizer(
@@ -65,10 +71,11 @@ fun CircularBeatVisualizer(
     modifier: Modifier = Modifier,
     barCount: Int = 64,
     innerRadiusFraction: Float = 0.72f,
-    liveBands: FloatArray? = null
+    liveBands: FloatArray? = null,
+    pulse: Float = 0f
 ) {
     if (liveBands != null && liveBands.isNotEmpty()) {
-        LiveRadialBars(liveBands, isPlaying, color, modifier, barCount, innerRadiusFraction)
+        LiveRadialBars(liveBands, isPlaying, color, modifier, barCount, innerRadiusFraction, pulse)
     } else {
         SyntheticRadialBars(isPlaying, color, modifier, barCount, innerRadiusFraction)
     }
@@ -170,7 +177,8 @@ private fun LiveLinearBars(
     isPlaying: Boolean,
     color: Color,
     modifier: Modifier,
-    barCount: Int
+    barCount: Int,
+    pulse: Float
 ) {
     Canvas(modifier = modifier) {
         val w = size.width
@@ -178,8 +186,12 @@ private fun LiveLinearBars(
         val barWidth = (w * 0.60f) / barCount
         val gap = (w - barWidth * barCount) / (barCount - 1).coerceAtLeast(1)
         val cornerR = barWidth / 2f
+        // Drum onset lifts every bar uniformly — small enough that
+        // sustained sections look natural, big enough that kicks read.
+        val pulseLift = pulse * 0.20f
         for (i in 0 until barCount) {
-            val heightFraction = liveBarHeight(i, barCount, bands, isPlaying)
+            val base = liveBarHeight(i, barCount, bands, isPlaying)
+            val heightFraction = (base + pulseLift).coerceIn(0.05f, 1f)
             val barH = h * heightFraction
             val y = (h - barH) / 2f
             drawRoundRect(
@@ -232,7 +244,8 @@ private fun LiveRadialBars(
     color: Color,
     modifier: Modifier,
     barCount: Int,
-    innerRadiusFraction: Float
+    innerRadiusFraction: Float,
+    pulse: Float
 ) {
     Canvas(modifier = modifier) {
         val w = size.width
@@ -240,9 +253,13 @@ private fun LiveRadialBars(
         val cx = w / 2f
         val cy = h / 2f
         val outerR = minOf(w, h) / 2f
+        // Drum onset pushes the whole ring outward up to 6% of the outer
+        // radius, then springs back — gives the visualiser a heartbeat
+        // that follows the kick instead of just twitching.
+        val pulseRadius = outerR * 0.06f * pulse
         val innerR = outerR * innerRadiusFraction
         val gap = outerR * 0.012f
-        val barInner = innerR + gap
+        val barInner = innerR + gap + pulseRadius
         val maxBarLength = (outerR - barInner - gap).coerceAtLeast(1f)
         // Bar width = half the arc spacing → bars look spaced, not solid ring.
         val barStroke = (2f * PI.toFloat() * barInner / barCount) * 0.55f
