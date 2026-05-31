@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -26,6 +27,7 @@ import com.example.yoloaio.navigation.AppNavGraph
 import com.example.yoloaio.notifications.ChatNotifications
 import com.example.yoloaio.notifications.NotificationChannels
 import com.example.yoloaio.ui.components.AppBackground
+import com.example.yoloaio.ui.components.LaunchAnimation
 import com.example.yoloaio.ui.theme.YoloAIOTheme
 import com.example.yoloaio.ui.theme.rememberThemePalette
 import kotlinx.coroutines.flow.collectLatest
@@ -76,6 +78,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             val config by rememberAppConfig()
             val palette by rememberThemePalette()
+            // Show the 3-second cyberpunk decryption splash on first
+            // composition. The nav graph mounts immediately underneath
+            // so any cold-start work (Firestore listeners, theme,
+            // config) finishes during the animation.
+            var splashDone by remember { mutableStateOf(false) }
             YoloAIOTheme(palette = palette) {
                 CompositionLocalProvider(LocalAppConfig provides config) {
                     AppBackground {
@@ -83,6 +90,9 @@ class MainActivity : ComponentActivity() {
                             deepLinkChatPartnerUid = deepLinkChatPartnerUid,
                             onDeepLinkConsumed = { deepLinkChatPartnerUid = null }
                         )
+                    }
+                    if (!splashDone) {
+                        LaunchAnimation(onComplete = { splashDone = true })
                     }
                 }
             }
