@@ -98,12 +98,13 @@ object JioSaavnClient {
     suspend fun search(
         query: String,
         language: MusicLanguage?,
-        limit: Int = 30
+        limit: Int = 30,
+        page: Int = 1
     ): Result<List<SaavnTrack>> = withContext(Dispatchers.IO) {
         val effectiveQuery = query.ifBlank { language?.label ?: "top" }
-        Log.d(TAG, "search start · query='$effectiveQuery' lang=${language?.code}")
+        Log.d(TAG, "search start · query='$effectiveQuery' lang=${language?.code} page=$page")
         runCatching {
-            val tracks = searchDirect(effectiveQuery, language, limit)
+            val tracks = searchDirect(effectiveQuery, language, limit, page)
             Log.d(TAG, "✓ direct returned ${tracks.size} tracks")
             tracks
         }.onFailure {
@@ -114,12 +115,13 @@ object JioSaavnClient {
     suspend fun searchAlbums(
         query: String,
         language: MusicLanguage?,
-        limit: Int = 24
+        limit: Int = 24,
+        page: Int = 1
     ): Result<List<SaavnAlbum>> = withContext(Dispatchers.IO) {
         val effectiveQuery = query.ifBlank { language?.label ?: "top albums" }
-        Log.d(TAG, "albums start · query='$effectiveQuery' lang=${language?.code}")
+        Log.d(TAG, "albums start · query='$effectiveQuery' lang=${language?.code} page=$page")
         runCatching {
-            val albums = searchAlbumsDirect(effectiveQuery, limit)
+            val albums = searchAlbumsDirect(effectiveQuery, limit, page)
             Log.d(TAG, "✓ albums returned ${albums.size}")
             albums
         }.onFailure {
@@ -130,12 +132,13 @@ object JioSaavnClient {
     suspend fun searchPlaylists(
         query: String,
         language: MusicLanguage?,
-        limit: Int = 24
+        limit: Int = 24,
+        page: Int = 1
     ): Result<List<SaavnPlaylist>> = withContext(Dispatchers.IO) {
         val effectiveQuery = query.ifBlank { language?.label ?: "trending playlists" }
-        Log.d(TAG, "playlists start · query='$effectiveQuery' lang=${language?.code}")
+        Log.d(TAG, "playlists start · query='$effectiveQuery' lang=${language?.code} page=$page")
         runCatching {
-            val playlists = searchPlaylistsDirect(effectiveQuery, limit)
+            val playlists = searchPlaylistsDirect(effectiveQuery, limit, page)
             Log.d(TAG, "✓ playlists returned ${playlists.size}")
             playlists
         }.onFailure {
@@ -143,12 +146,12 @@ object JioSaavnClient {
         }
     }
 
-    private fun searchAlbumsDirect(query: String, limit: Int): List<SaavnAlbum> {
+    private fun searchAlbumsDirect(query: String, limit: Int, page: Int): List<SaavnAlbum> {
         val params = linkedMapOf(
             "__call" to "search.getAlbumResults",
             "q" to query,
             "n" to limit.toString(),
-            "p" to "1",
+            "p" to page.toString(),
             "api_version" to "4",
             "_format" to "json",
             "_marker" to "0",
@@ -161,12 +164,12 @@ object JioSaavnClient {
         return parseAlbumsResponse(text)
     }
 
-    private fun searchPlaylistsDirect(query: String, limit: Int): List<SaavnPlaylist> {
+    private fun searchPlaylistsDirect(query: String, limit: Int, page: Int): List<SaavnPlaylist> {
         val params = linkedMapOf(
             "__call" to "search.getPlaylistResults",
             "q" to query,
             "n" to limit.toString(),
-            "p" to "1",
+            "p" to page.toString(),
             "api_version" to "4",
             "_format" to "json",
             "_marker" to "0",
@@ -261,13 +264,14 @@ object JioSaavnClient {
     private fun searchDirect(
         query: String,
         language: MusicLanguage?,
-        limit: Int
+        limit: Int,
+        page: Int
     ): List<SaavnTrack> {
         val params = linkedMapOf(
             "__call" to "search.getResults",
             "q" to query,            // JioSaavn expects "q", not "query"
             "n" to limit.toString(),
-            "p" to "1",
+            "p" to page.toString(),
             "api_version" to "4",
             "_format" to "json",
             "_marker" to "0",

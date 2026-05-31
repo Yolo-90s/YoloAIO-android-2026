@@ -30,6 +30,15 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -153,43 +162,167 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
     var albumsState by remember { mutableStateOf<TabContent<SaavnAlbum>>(TabContent.Loading) }
     var playlistsState by remember { mutableStateOf<TabContent<SaavnPlaylist>>(TabContent.Loading) }
 
+    // Per-tab pagination state. Tracking current page + loadingMore + done
+    // separately for each tab so switching between tabs preserves your
+    // accumulated list and scroll position — flipping Songs ↔ Albums
+    // doesn't re-fetch from page 1.
+    var songsPage by remember { mutableIntStateOf(1) }
+    var albumsPage by remember { mutableIntStateOf(1) }
+    var playlistsPage by remember { mutableIntStateOf(1) }
+    var songsLoadingMore by remember { mutableStateOf(false) }
+    var albumsLoadingMore by remember { mutableStateOf(false) }
+    var playlistsLoadingMore by remember { mutableStateOf(false) }
+    var songsDone by remember { mutableStateOf(false) }
+    var albumsDone by remember { mutableStateOf(false) }
+    var playlistsDone by remember { mutableStateOf(false) }
+
+    // Per-tab list/grid scroll state, hoisted so we can watch them
+    // from a LaunchedEffect and trigger loadMore as the user scrolls.
+    val songsListState = rememberLazyListState()
+    val albumsGridState = rememberLazyGridState()
+    val playlistsGridState = rememberLazyGridState()
+
     LaunchedEffect(query) {
         delay(400)
         debouncedQuery = query.trim()
     }
 
-    LaunchedEffect(tab, debouncedQuery, primaryLang, reloadKey) {
-        when (tab) {
-            MusicTab.Songs -> {
-                songsState = TabContent.Loading
-                JioSaavnClient.search(debouncedQuery, primaryLang)
-                    .onSuccess { tracks ->
-                        songsState = TabContent.Ready(tracks)
-                        player.bind(tracks) { it.streamUrl }
-                    }
-                    .onFailure {
-                        songsState = TabContent.Error(it.message ?: "Failed to load")
-                    }
+    // First-page fetch — fires whenever the search query / language /
+    // reload key changes. NOT keyed on `tab` because we want each tab
+    // to keep its own list when the user flips back and forth.
+    LaunchedEffect(debouncedQuery, primaryLang, reloadKey) {
+        // Songs
+        songsState = TabContent.Loading
+        songsPage = 1
+        songsDone = false
+        JioSaavnClient.search(debouncedQuery, primaryLang, page = 1)
+            .onSuccess { tracks ->
+                songsState = TabContent.Ready(tracks)
+                if (tracks.size < 30) songsDone = true
+                player.bind(tracks) { it.streamUrl }
             }
-            MusicTab.Albums -> {
-                albumsState = TabContent.Loading
-                JioSaavnClient.searchAlbums(debouncedQuery, primaryLang)
-                    .onSuccess { albumsState = TabContent.Ready(it) }
-                    .onFailure { albumsState = TabContent.Error(it.message ?: "Failed to load") }
+            .onFailure { songsState = TabContent.Error(it.message ?: "Failed to load") }
+
+        // Albums
+        albumsState = TabContent.Loading
+        albumsPage = 1
+        albumsDone = false
+        JioSaavnClient.searchAlbums(debouncedQuery, primaryLang, page = 1)
+            .onSuccess { items ->
+                albumsState = TabContent.Ready(items)
+                if (items.size < 24) albumsDone = true
             }
-            MusicTab.Playlists -> {
-                playlistsState = TabContent.Loading
-                JioSaavnClient.searchPlaylists(debouncedQuery, primaryLang)
-                    .onSuccess { playlistsState = TabContent.Ready(it) }
-                    .onFailure { playlistsState = TabContent.Error(it.message ?: "Failed to load") }
+            .onFailure { albumsState = TabContent.Error(it.message ?: "Failed to load") }
+
+        // Playlists
+        playlistsState = TabContent.Loading
+        playlistsPage = 1
+        playlistsDone = false
+        JioSaavnClient.searchPlaylists(debouncedQuery, primaryLang, page = 1)
+            .onSuccess { items ->
+                playlistsState = TabContent.Ready(items)
+                if (items.size < 24) playlistsDone = true
             }
-            MusicTab.Favorites -> {
-                // Driven by the Flow above. Re-bind the player to the favourites
-                // list when this tab is the active surface so next/prev walk
-                // favourites, not the songs queue.
-                player.bind(favorites.map { it.toTrack() }) { it.streamUrl }
-            }
+            .onFailure { playlistsState = TabContent.Error(it.message ?: "Failed to load") }
+    }
+
+    // (Favorites rebind handled by the existing LaunchedEffect(favorites, tab)
+    // a bit further down — not duplicated here.)
+
+    // ── Auto-load-more for each scroll list ─────────────────────
+    // Same pattern as Movies: watch the last-visible item index via
+    // snapshotFlow; when it's within ~5 of the end, kick off the next
+    // page. Per-tab gating means a scroll in Albums won't trigger a
+    // Songs fetch and vice versa.
+    LaunchedEffect(songsListState, debouncedQuery, primaryLang) {
+        snapshotFlow {
+            val total = songsListState.layoutInfo.totalItemsCount
+            val last = songsListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            Triple(total, last, total > 0 && last >= total - 5)
         }
+            .distinctUntilChanged()
+            .collect { (total, _, near) ->
+                if (!near || songsLoadingMore || songsDone || total == 0) return@collect
+                val ready = songsState as? TabContent.Ready ?: return@collect
+                songsLoadingMore = true
+                val next = songsPage + 1
+                JioSaavnClient.search(debouncedQuery, primaryLang, page = next)
+                    .onSuccess { more ->
+                        if (more.isEmpty()) songsDone = true
+                        else {
+                            val seen = ready.items.mapTo(HashSet()) { it.id }
+                            val fresh = more.filter { it.id !in seen }
+                            if (fresh.isEmpty()) songsDone = true
+                            else {
+                                songsState = TabContent.Ready(ready.items + fresh)
+                                songsPage = next
+                                if (more.size < 30) songsDone = true
+                                player.bind((ready.items + fresh)) { it.streamUrl }
+                            }
+                        }
+                    }
+                songsLoadingMore = false
+            }
+    }
+
+    LaunchedEffect(albumsGridState, debouncedQuery, primaryLang) {
+        snapshotFlow {
+            val total = albumsGridState.layoutInfo.totalItemsCount
+            val last = albumsGridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            Triple(total, last, total > 0 && last >= total - 4)
+        }
+            .distinctUntilChanged()
+            .collect { (total, _, near) ->
+                if (!near || albumsLoadingMore || albumsDone || total == 0) return@collect
+                val ready = albumsState as? TabContent.Ready ?: return@collect
+                albumsLoadingMore = true
+                val next = albumsPage + 1
+                JioSaavnClient.searchAlbums(debouncedQuery, primaryLang, page = next)
+                    .onSuccess { more ->
+                        if (more.isEmpty()) albumsDone = true
+                        else {
+                            val seen = ready.items.mapTo(HashSet()) { it.id }
+                            val fresh = more.filter { it.id !in seen }
+                            if (fresh.isEmpty()) albumsDone = true
+                            else {
+                                albumsState = TabContent.Ready(ready.items + fresh)
+                                albumsPage = next
+                                if (more.size < 24) albumsDone = true
+                            }
+                        }
+                    }
+                albumsLoadingMore = false
+            }
+    }
+
+    LaunchedEffect(playlistsGridState, debouncedQuery, primaryLang) {
+        snapshotFlow {
+            val total = playlistsGridState.layoutInfo.totalItemsCount
+            val last = playlistsGridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            Triple(total, last, total > 0 && last >= total - 4)
+        }
+            .distinctUntilChanged()
+            .collect { (total, _, near) ->
+                if (!near || playlistsLoadingMore || playlistsDone || total == 0) return@collect
+                val ready = playlistsState as? TabContent.Ready ?: return@collect
+                playlistsLoadingMore = true
+                val next = playlistsPage + 1
+                JioSaavnClient.searchPlaylists(debouncedQuery, primaryLang, page = next)
+                    .onSuccess { more ->
+                        if (more.isEmpty()) playlistsDone = true
+                        else {
+                            val seen = ready.items.mapTo(HashSet()) { it.id }
+                            val fresh = more.filter { it.id !in seen }
+                            if (fresh.isEmpty()) playlistsDone = true
+                            else {
+                                playlistsState = TabContent.Ready(ready.items + fresh)
+                                playlistsPage = next
+                                if (more.size < 24) playlistsDone = true
+                            }
+                        }
+                    }
+                playlistsLoadingMore = false
+            }
     }
 
     // Re-bind to favourites whenever the favourites Flow emits, but only if
@@ -232,6 +365,9 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
                             favoriteIds = favoriteIds,
                             playNextCount = player.playNext.size,
                             bottomInset = if (player.current != null) 96.dp else 12.dp,
+                            listState = songsListState,
+                            isLoadingMore = songsLoadingMore,
+                            done = songsDone,
                             onPlay = { player.play(it) },
                             onFavoriteToggle = { track ->
                                 scope.launch {
@@ -245,6 +381,9 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
 
                         MusicTab.Albums -> AlbumsView(
                             state = albumsState,
+                            gridState = albumsGridState,
+                            isLoadingMore = albumsLoadingMore,
+                            done = albumsDone,
                             onTap = { album ->
                                 query = album.title
                                 tab = MusicTab.Songs
@@ -254,6 +393,9 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
 
                         MusicTab.Playlists -> PlaylistsView(
                             state = playlistsState,
+                            gridState = playlistsGridState,
+                            isLoadingMore = playlistsLoadingMore,
+                            done = playlistsDone,
                             onTap = { pl ->
                                 query = pl.title
                                 tab = MusicTab.Songs
@@ -357,6 +499,9 @@ private fun SongsView(
     favoriteIds: Set<String>,
     playNextCount: Int,
     bottomInset: androidx.compose.ui.unit.Dp,
+    listState: LazyListState,
+    isLoadingMore: Boolean,
+    done: Boolean,
     onPlay: (SaavnTrack) -> Unit,
     onFavoriteToggle: (SaavnTrack) -> Unit,
     onPlayNext: (SaavnTrack) -> Unit,
@@ -370,6 +515,7 @@ private fun SongsView(
                 EmptyResults("No songs")
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
                     contentPadding = PaddingValues(top = 8.dp, bottom = bottomInset)
                 ) {
@@ -397,6 +543,30 @@ private fun SongsView(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                             )
+                        }
+                    }
+                    // Pagination footer
+                    if (isLoadingMore) {
+                        item(key = "songs-loading-more") {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                            }
+                        }
+                    } else if (done) {
+                        item(key = "songs-end") {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "You've reached the end · ${state.items.size} songs",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
@@ -517,6 +687,9 @@ private fun TrackRow(
 @Composable
 private fun AlbumsView(
     state: TabContent<SaavnAlbum>,
+    gridState: LazyGridState,
+    isLoadingMore: Boolean,
+    done: Boolean,
     onTap: (SaavnAlbum) -> Unit,
     onRetry: () -> Unit
 ) {
@@ -528,6 +701,7 @@ private fun AlbumsView(
                 EmptyResults("No albums")
             } else {
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Fixed(2),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -536,6 +710,29 @@ private fun AlbumsView(
                 ) {
                     items(state.items, key = { it.id }) { album ->
                         AlbumCard(album = album, onClick = { onTap(album) })
+                    }
+                    if (isLoadingMore) {
+                        item(key = "albums-loading-more", span = { GridItemSpan(maxLineSpan) }) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                            }
+                        }
+                    } else if (done) {
+                        item(key = "albums-end", span = { GridItemSpan(maxLineSpan) }) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "You've reached the end · ${state.items.size} albums",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -601,6 +798,9 @@ private fun AlbumCard(album: SaavnAlbum, onClick: () -> Unit) {
 @Composable
 private fun PlaylistsView(
     state: TabContent<SaavnPlaylist>,
+    gridState: LazyGridState,
+    isLoadingMore: Boolean,
+    done: Boolean,
     onTap: (SaavnPlaylist) -> Unit,
     onRetry: () -> Unit
 ) {
@@ -612,6 +812,7 @@ private fun PlaylistsView(
                 EmptyResults("No playlists")
             } else {
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Fixed(2),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -620,6 +821,29 @@ private fun PlaylistsView(
                 ) {
                     items(state.items, key = { it.id }) { playlist ->
                         PlaylistCard(playlist = playlist, onClick = { onTap(playlist) })
+                    }
+                    if (isLoadingMore) {
+                        item(key = "playlists-loading-more", span = { GridItemSpan(maxLineSpan) }) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                            }
+                        }
+                    } else if (done) {
+                        item(key = "playlists-end", span = { GridItemSpan(maxLineSpan) }) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "You've reached the end · ${state.items.size} playlists",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }

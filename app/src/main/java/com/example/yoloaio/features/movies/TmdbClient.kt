@@ -39,6 +39,42 @@ data class TmdbTitle(
 
 data class TmdbGenre(val id: Int, val name: String)
 
+// Curated TMDb genre IDs used by the Browse-rows landing on MoviesScreen.
+// These are canonical TMDb ids and have been stable for a decade — hard-
+// coding them lets us render the Netflix-style row stack without an extra
+// /genre/list round-trip on every screen open. The genre chips at the top
+// of the screen still use the live list from TmdbClient.genres() so any
+// new TMDb additions show up there.
+val MOVIE_GENRES = listOf(
+    TmdbGenre(28,    "Action"),
+    TmdbGenre(12,    "Adventure"),
+    TmdbGenre(16,    "Animation"),
+    TmdbGenre(35,    "Comedy"),
+    TmdbGenre(80,    "Crime"),
+    TmdbGenre(18,    "Drama"),
+    TmdbGenre(10751, "Family"),
+    TmdbGenre(14,    "Fantasy"),
+    TmdbGenre(27,    "Horror"),
+    TmdbGenre(9648,  "Mystery"),
+    TmdbGenre(10749, "Romance"),
+    TmdbGenre(878,   "Sci-Fi"),
+    TmdbGenre(53,    "Thriller")
+)
+
+val TV_GENRES = listOf(
+    TmdbGenre(10759, "Action & Adventure"),
+    TmdbGenre(16,    "Animation"),
+    TmdbGenre(35,    "Comedy"),
+    TmdbGenre(80,    "Crime"),
+    TmdbGenre(18,    "Drama"),
+    TmdbGenre(10751, "Family"),
+    TmdbGenre(9648,  "Mystery"),
+    TmdbGenre(10765, "Sci-Fi & Fantasy")
+)
+
+fun genresFor(media: MediaType): List<TmdbGenre> =
+    if (media == MediaType.Tv) TV_GENRES else MOVIE_GENRES
+
 data class TmdbSeason(
     val seasonNumber: Int,
     val name: String,
@@ -77,8 +113,13 @@ object TmdbClient {
     suspend fun topRated(media: MediaType, apiKey: String, page: Int = 1) =
         getList("/${media.path}/top_rated", apiKey, mapOf("page" to page.toString(), "language" to "en-US"), media)
 
-    suspend fun trending(media: MediaType, apiKey: String, window: String = "week") =
-        getList("/trending/${media.path}/$window", apiKey, mapOf("language" to "en-US"), media)
+    suspend fun trending(media: MediaType, apiKey: String, page: Int = 1, window: String = "week") =
+        getList(
+            "/trending/${media.path}/$window",
+            apiKey,
+            mapOf("page" to page.toString(), "language" to "en-US"),
+            media
+        )
 
     suspend fun discoverByGenre(media: MediaType, genreId: Int, apiKey: String, page: Int = 1) =
         getList(

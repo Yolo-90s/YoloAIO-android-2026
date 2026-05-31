@@ -20,6 +20,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -46,10 +49,14 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,6 +104,33 @@ fun MoviesScreen(
     var genres by remember { mutableStateOf<List<TmdbGenre>>(emptyList()) }
     var reloadKey by remember { mutableStateOf(0) }
 
+    // Pagination state. `currentPage` tracks the most-recent page we
+    // successfully fetched; `isLoadingMore` gates the IntersectionObserver-
+    // style auto-loader so a scroll storm doesn't fire N overlapping
+    // requests. `done` means we hit a short page (< 20) so TMDb has no
+    // more for this filter.
+    var currentPage by remember { mutableIntStateOf(1) }
+    var isLoadingMore by remember { mutableStateOf(false) }
+    var done by remember { mutableStateOf(false) }
+    val gridState = rememberLazyGridState()
+
+    // Browse mode = the Netflix-style row stack. Only shown on the
+    // default landing (no search, default section, no genre).
+    val isBrowseMode = debouncedQuery.isBlank() && section == Section.Popular && selectedGenre == null
+
+    // Shared per-page fetcher — closes over the current section/genre/query
+    // so a single function handles every source.
+    suspend fun fetchPage(page: Int): Result<List<TmdbTitle>> {
+        val key = config.tmdbAuth
+        return when {
+            debouncedQuery.isNotBlank() -> TmdbClient.search(media, debouncedQuery, key, page)
+            selectedGenre != null -> TmdbClient.discoverByGenre(media, selectedGenre!!.id, key, page)
+            section == Section.Popular -> TmdbClient.popular(media, key, page)
+            section == Section.TopRated -> TmdbClient.topRated(media, key, page)
+            else -> TmdbClient.trending(media, key, page)
+        }
+    }
+
     LaunchedEffect(query) {
         delay(400)
         debouncedQuery = query.trim()
@@ -109,26 +143,70 @@ fun MoviesScreen(
             .onFailure { genres = emptyList() }
     }
 
-    LaunchedEffect(media, section, selectedGenre, debouncedQuery, config.tmdbAuth, reloadKey) {
+    // First-page fetch — runs whenever the filter changes (or the user
+    // taps refresh). Resets pagination state. Skipped in Browse mode
+    // because each CategoryRow fetches its own first page independently.
+    LaunchedEffect(media, section, selectedGenre, debouncedQuery, config.tmdbAuth, reloadKey, isBrowseMode) {
         if (config.tmdbAuth.isBlank()) {
             state = ContentState.MissingKey
             return@LaunchedEffect
         }
-        state = ContentState.Loading
-        val key = config.tmdbAuth
-        val result = when {
-            debouncedQuery.isNotBlank() -> TmdbClient.search(media, debouncedQuery, key)
-            selectedGenre != null -> TmdbClient.discoverByGenre(media, selectedGenre!!.id, key)
-            section == Section.Popular -> TmdbClient.popular(media, key)
-            section == Section.TopRated -> TmdbClient.topRated(media, key)
-            else -> TmdbClient.trending(media, key)
+        if (isBrowseMode) {
+            // Browse mode owns its own rendering — we just clear the grid
+            // state so a future switch to grid mode starts from scratch.
+            state = ContentState.Ready(emptyList())
+            currentPage = 1
+            done = false
+            return@LaunchedEffect
         }
-        result
+        state = ContentState.Loading
+        currentPage = 1
+        done = false
+        fetchPage(1)
             .onSuccess { titles ->
                 TmdbCache.setList(titles)
                 state = ContentState.Ready(titles)
+                if (titles.size < 20) done = true
             }
             .onFailure { state = ContentState.Error(it.message ?: "Failed to load") }
+    }
+
+    // Watch scroll position — when we get within 5 rows of the end of the
+    // current list, kick off the next page. distinctUntilChanged keeps the
+    // collector from re-firing on every visible-items recompute.
+    LaunchedEffect(gridState, isBrowseMode) {
+        if (isBrowseMode) return@LaunchedEffect
+        snapshotFlow {
+            val total = gridState.layoutInfo.totalItemsCount
+            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            Triple(total, lastVisible, total > 0 && lastVisible >= total - 6)
+        }
+            .distinctUntilChanged()
+            .collect { (total, _, shouldLoadMore) ->
+                val readyState = state as? ContentState.Ready ?: return@collect
+                if (!shouldLoadMore || isLoadingMore || done || total == 0) return@collect
+                isLoadingMore = true
+                val nextPage = currentPage + 1
+                fetchPage(nextPage)
+                    .onSuccess { more ->
+                        if (more.isEmpty()) {
+                            done = true
+                        } else {
+                            TmdbCache.setList(more)
+                            // De-dupe by id so accidental overlap between
+                            // adjacent pages doesn't render twice.
+                            val seen = readyState.titles.mapTo(HashSet()) { "${it.mediaType}-${it.id}" }
+                            val fresh = more.filter { "${it.mediaType}-${it.id}" !in seen }
+                            if (fresh.isEmpty()) done = true
+                            else {
+                                state = ContentState.Ready(readyState.titles + fresh)
+                                currentPage = nextPage
+                                if (more.size < 20) done = true
+                            }
+                        }
+                    }
+                isLoadingMore = false
+            }
     }
 
     FeatureScaffold(
@@ -187,16 +265,27 @@ fun MoviesScreen(
                 }
             }
 
-            when (val s = state) {
-                ContentState.Loading -> Centered { CircularProgressIndicator() }
-                ContentState.MissingKey -> MissingKeyState(modifier = Modifier.fillMaxSize())
-                is ContentState.Error -> ErrorState(
-                    message = s.message,
-                    modifier = Modifier.fillMaxSize(),
-                    onRetry = { reloadKey++ }
+            when {
+                state is ContentState.MissingKey ->
+                    MissingKeyState(modifier = Modifier.fillMaxSize())
+                state is ContentState.Error ->
+                    ErrorState(
+                        message = (state as ContentState.Error).message,
+                        modifier = Modifier.fillMaxSize(),
+                        onRetry = { reloadKey++ }
+                    )
+                isBrowseMode -> BrowseRows(
+                    media = media,
+                    onSelect = { title -> onTitleClick(title.mediaType, title.idAsString) },
+                    onTrendingSeeAll = { section = Section.Trending; selectedGenre = null },
+                    onTopRatedSeeAll = { section = Section.TopRated; selectedGenre = null },
+                    onGenreSeeAll = { genre -> selectedGenre = genre; section = Section.Popular }
                 )
-                is ContentState.Ready -> {
-                    if (s.titles.isEmpty()) {
+                state is ContentState.Loading ->
+                    Centered { CircularProgressIndicator() }
+                state is ContentState.Ready -> {
+                    val titles = (state as ContentState.Ready).titles
+                    if (titles.isEmpty()) {
                         EmptyResults(
                             query = debouncedQuery,
                             modifier = Modifier.fillMaxSize()
@@ -208,15 +297,69 @@ fun MoviesScreen(
                         // immediately without an oversized first row.
                         val showHero = debouncedQuery.isBlank() && selectedGenre == null
                         MoviesGrid(
-                            titles = s.titles,
+                            titles = titles,
                             sectionLabel = "${section.label} ${if (media == MediaType.Movie) "movies" else "shows"}",
                             showHero = showHero,
+                            gridState = gridState,
+                            isLoadingMore = isLoadingMore,
+                            done = done,
                             modifier = Modifier.fillMaxSize(),
                             onClick = { title -> onTitleClick(title.mediaType, title.idAsString) }
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Netflix-style landing view — vertical column of horizontal category
+ * strips. Each row fetches its own first page so a failure or empty
+ * result in one row doesn't drag the whole screen down. "See all" on
+ * a row pins the parent to that source and drops back into the flat
+ * paginated grid.
+ */
+@Composable
+private fun BrowseRows(
+    media: MediaType,
+    onSelect: (TmdbTitle) -> Unit,
+    onTrendingSeeAll: () -> Unit,
+    onTopRatedSeeAll: () -> Unit,
+    onGenreSeeAll: (TmdbGenre) -> Unit
+) {
+    val config = LocalAppConfig.current
+    val key = config.tmdbAuth
+    val noun = if (media == MediaType.Tv) "shows" else "movies"
+    val genres = genresFor(media)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(top = 8.dp, bottom = 32.dp)
+    ) {
+        CategoryRow(
+            title = "Trending this week",
+            fetchRow = { TmdbClient.trending(media, key, 1) },
+            onSelect = onSelect,
+            onSeeAll = onTrendingSeeAll
+        )
+        CategoryRow(
+            title = "Top Rated",
+            fetchRow = { TmdbClient.topRated(media, key, 1) },
+            onSelect = onSelect,
+            onSeeAll = onTopRatedSeeAll
+        )
+        genres.forEach { g ->
+            CategoryRow(
+                title = "${g.name} $noun",
+                // Compose remembers the row by its title, so re-using the
+                // same string ("Action movies") between renders is fine.
+                fetchRow = { TmdbClient.discoverByGenre(media, g.id, key, 1) },
+                onSelect = onSelect,
+                onSeeAll = { onGenreSeeAll(g) }
+            )
         }
     }
 }
@@ -329,11 +472,15 @@ private fun MoviesGrid(
     titles: List<TmdbTitle>,
     sectionLabel: String,
     showHero: Boolean,
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
+    isLoadingMore: Boolean,
+    done: Boolean,
     modifier: Modifier,
     onClick: (TmdbTitle) -> Unit
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
+        state = gridState,
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -372,6 +519,36 @@ private fun MoviesGrid(
         } else {
             items(titles, key = { "${it.mediaType}-${it.id}" }) { title ->
                 TitleCard(title = title, onClick = { onClick(title) })
+            }
+        }
+        // Bottom indicator — full-width row at the end of the grid that
+        // shows a spinner while the next page loads, or a small "end of
+        // list" caption once TMDb has nothing left.
+        if (isLoadingMore) {
+            item(key = "loading-more", span = { GridItemSpan(maxLineSpan) }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+                }
+            }
+        } else if (done && titles.isNotEmpty()) {
+            item(key = "end-of-list", span = { GridItemSpan(maxLineSpan) }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "You've reached the end · ${titles.size} titles",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
@@ -574,7 +751,7 @@ private fun SectionHeading(title: String, subtitle: String? = null) {
 }
 
 @Composable
-private fun TitleCard(title: TmdbTitle, onClick: () -> Unit) {
+internal fun TitleCard(title: TmdbTitle, onClick: () -> Unit) {
     val gradient = remember(title.id) { gradientFor(title.id) }
     Surface(
         onClick = onClick,

@@ -70,26 +70,10 @@ fun TvPlayerScreen(
         title = title,
         onBack = onBack,
         actions = {
-            // See MoviePlayerScreen — Vidking's WebView player can't be
-            // app-cast to Chromecast directly. This routes to screen-mirror
-            // as the realistic fallback.
-            IconButton(onClick = {
-                runCatching {
-                    context.startActivity(
-                        Intent(Settings.ACTION_CAST_SETTINGS).addFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK
-                        )
-                    )
-                }.onFailure {
-                    Toast.makeText(
-                        context,
-                        "Cast settings not available on this device",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }) {
-                Icon(Icons.Rounded.Cast, contentDescription = "Cast to TV")
-            }
+            // Cast routes to system Cast Settings for screen mirror.
+            // PlayerCastButton wraps the intent with an explanation
+            // dialog so users aren't surprised by the redirect.
+            PlayerCastButton()
         }
     ) { padding ->
         AndroidView(

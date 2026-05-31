@@ -63,28 +63,11 @@ fun MoviePlayerScreen(movieId: String, onBack: () -> Unit) {
         title = title,
         onBack = onBack,
         actions = {
-            // Vidking renders its player inside a WebView (we don't have the
-            // raw HLS stream), so true app-level Chromecast isn't possible
-            // here. The realistic alternative is screen-mirror — this opens
-            // system Cast Settings where the user picks a device to mirror
-            // the entire screen onto.
-            IconButton(onClick = {
-                runCatching {
-                    context.startActivity(
-                        Intent(Settings.ACTION_CAST_SETTINGS).addFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK
-                        )
-                    )
-                }.onFailure {
-                    Toast.makeText(
-                        context,
-                        "Cast settings not available on this device",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }) {
-                Icon(Icons.Rounded.Cast, contentDescription = "Cast to TV")
-            }
+            // Cast routes the user to system Cast Settings (the only
+            // viable path on Android since Vidking gives us an iframe,
+            // not a raw stream URL). PlayerCastButton wraps that intent
+            // with a short explanation dialog.
+            PlayerCastButton()
         }
     ) { padding ->
         AndroidView(

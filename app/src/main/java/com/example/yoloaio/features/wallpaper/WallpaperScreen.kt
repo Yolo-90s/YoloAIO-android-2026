@@ -16,6 +16,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -82,6 +87,14 @@ fun WallpaperScreen(
     var state by remember { mutableStateOf<WallpaperState>(WallpaperState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
 
+    // Pagination state — same shape as Movies/Music. Reset whenever the
+    // search query / orientation / API key changes; appended when the
+    // scroll-watcher below decides we're near the end.
+    var currentPage by remember { mutableIntStateOf(1) }
+    var isLoadingMore by remember { mutableStateOf(false) }
+    var done by remember { mutableStateOf(false) }
+    val gridState = rememberLazyStaggeredGridState()
+
     LaunchedEffect(query) {
         delay(400)
         debouncedQuery = query.trim()
@@ -93,18 +106,66 @@ fun WallpaperScreen(
             return@LaunchedEffect
         }
         state = WallpaperState.Loading
+        currentPage = 1
+        done = false
         val effectiveQuery = debouncedQuery.ifBlank { config.unsplashQuery }
         UnsplashClient.search(
             query = effectiveQuery,
             accessKey = config.unsplashAccessKey,
             perPage = 30,
-            orientation = orientation
+            orientation = orientation,
+            page = 1
         )
             .onSuccess { photos ->
                 WallpaperCache.set(photos)
                 state = WallpaperState.Ready(photos)
+                if (photos.size < 30) done = true
             }
             .onFailure { state = WallpaperState.Error(it.message ?: "Failed to load") }
+    }
+
+    // Auto-load-more: when the user scrolls within ~5 items of the
+    // end, fetch the next page and append. Unsplash supports up to
+    // page=N for any search; we stop when a page returns fewer than
+    // 30 items.
+    LaunchedEffect(gridState, debouncedQuery, orientation, config.unsplashAccessKey) {
+        snapshotFlow {
+            val total = gridState.layoutInfo.totalItemsCount
+            val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            Triple(total, last, total > 0 && last >= total - 5)
+        }
+            .distinctUntilChanged()
+            .collect { (total, _, near) ->
+                if (!near || isLoadingMore || done || total == 0) return@collect
+                val ready = state as? WallpaperState.Ready ?: return@collect
+                if (config.unsplashAccessKey.isBlank()) return@collect
+                isLoadingMore = true
+                val next = currentPage + 1
+                val effectiveQuery = debouncedQuery.ifBlank { config.unsplashQuery }
+                UnsplashClient.search(
+                    query = effectiveQuery,
+                    accessKey = config.unsplashAccessKey,
+                    perPage = 30,
+                    orientation = orientation,
+                    page = next
+                )
+                    .onSuccess { more ->
+                        if (more.isEmpty()) done = true
+                        else {
+                            val seen = ready.photos.mapTo(HashSet()) { it.id }
+                            val fresh = more.filter { it.id !in seen }
+                            if (fresh.isEmpty()) done = true
+                            else {
+                                val combined = ready.photos + fresh
+                                WallpaperCache.set(combined)
+                                state = WallpaperState.Ready(combined)
+                                currentPage = next
+                                if (more.size < 30) done = true
+                            }
+                        }
+                    }
+                isLoadingMore = false
+            }
     }
 
     Scaffold(
@@ -166,6 +227,9 @@ fun WallpaperScreen(
                     } else {
                         PinterestGrid(
                             photos = filtered,
+                            gridState = gridState,
+                            isLoadingMore = isLoadingMore,
+                            done = done,
                             modifier = Modifier.fillMaxSize(),
                             onClick = onWallpaperClick
                         )
@@ -249,10 +313,14 @@ private fun FilterRow(
 @Composable
 private fun PinterestGrid(
     photos: List<UnsplashPhoto>,
+    gridState: androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState,
+    isLoadingMore: Boolean,
+    done: Boolean,
     modifier: Modifier,
     onClick: (String) -> Unit
 ) {
     LazyVerticalStaggeredGrid(
+        state = gridState,
         // Adaptive width so on tablets / foldables we get 3+ columns
         // without changing the file. On regular phones still ends up
         // 2-wide because of the 170 dp minimum.
@@ -264,6 +332,29 @@ private fun PinterestGrid(
     ) {
         items(photos, key = { it.id }) { photo ->
             WallpaperCard(photo = photo, onClick = { onClick(photo.id) })
+        }
+        if (isLoadingMore) {
+            item(key = "wp-loading-more", span = StaggeredGridItemSpan.FullLine) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                }
+            }
+        } else if (done) {
+            item(key = "wp-end", span = StaggeredGridItemSpan.FullLine) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "You've reached the end · ${photos.size} photos",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }

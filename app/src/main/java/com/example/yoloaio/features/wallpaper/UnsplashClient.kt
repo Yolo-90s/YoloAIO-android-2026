@@ -49,13 +49,14 @@ object UnsplashClient {
         query: String,
         accessKey: String,
         perPage: Int = 30,
-        orientation: WallpaperOrientation = WallpaperOrientation.Portrait
+        orientation: WallpaperOrientation = WallpaperOrientation.Portrait,
+        page: Int = 1
     ): Result<List<UnsplashPhoto>> = withContext(Dispatchers.IO) {
         runCatching {
             require(accessKey.isNotBlank()) { "Missing Unsplash access key" }
             val q = URLEncoder.encode(query.ifBlank { "nature" }, "UTF-8")
             val orientationParam = orientation.apiValue?.let { "&orientation=$it" }.orEmpty()
-            val url = URL("$BASE/search/photos?query=$q&per_page=$perPage$orientationParam")
+            val url = URL("$BASE/search/photos?query=$q&per_page=$perPage&page=$page$orientationParam")
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("Authorization", "Client-ID $accessKey")
