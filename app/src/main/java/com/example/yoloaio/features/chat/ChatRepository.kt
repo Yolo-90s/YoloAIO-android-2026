@@ -21,6 +21,9 @@ class ChatRepository {
     private val currentUid: String?
         get() = auth.currentUser?.uid
 
+    private inline fun <reified T : Any> safeDocToObject(doc: com.google.firebase.firestore.DocumentSnapshot): T? =
+        runCatching { doc.toObject(T::class.java) }.getOrNull()
+
     fun observeOtherUsers(): Flow<List<UserProfile>> = callbackFlow {
         val me = currentUid
         val registration = firestore.collection("users")
@@ -30,7 +33,7 @@ class ChatRepository {
                     return@addSnapshotListener
                 }
                 val users = snap?.documents
-                    ?.mapNotNull { it.toObject(UserProfile::class.java) }
+                    ?.mapNotNull { safeDocToObject<UserProfile>(it) }
                     ?.filter { it.uid.isNotBlank() && it.uid != me }
                     ?.sortedBy { it.displayName.lowercase() }
                     ?: emptyList()
@@ -40,8 +43,8 @@ class ChatRepository {
     }
 
     suspend fun fetchUser(uid: String): UserProfile? = runCatching {
-        firestore.collection("users").document(uid).get().await()
-            .toObject(UserProfile::class.java)
+        val doc = firestore.collection("users").document(uid).get().await()
+        safeDocToObject<UserProfile>(doc)
     }.getOrNull()
 
     private fun observeMyChats(): Flow<Map<String, ChatDoc>> = callbackFlow {
@@ -55,7 +58,7 @@ class ChatRepository {
             .whereArrayContains("participants", me)
             .addSnapshotListener { snap, _ ->
                 val map = snap?.documents
-                    ?.mapNotNull { it.toObject(ChatDoc::class.java) }
+                    ?.mapNotNull { safeDocToObject<ChatDoc>(it) }
                     ?.associateBy { chat ->
                         chat.participants.firstOrNull { it != me } ?: ""
                     }
@@ -98,7 +101,7 @@ class ChatRepository {
                     return@addSnapshotListener
                 }
                 val msgs = snap?.documents?.mapNotNull { doc ->
-                    doc.toObject(ChatMessageDoc::class.java)?.copy(id = doc.id)
+                    safeDocToObject<ChatMessageDoc>(doc)?.copy(id = doc.id)
                 } ?: emptyList()
                 trySend(msgs)
             }

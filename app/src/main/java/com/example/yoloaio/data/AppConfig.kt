@@ -43,6 +43,12 @@ data class AppConfig(
      */
     val tmdbAuth: String
         get() = tmdbAccessToken.takeIf { it.isNotBlank() } ?: tmdbApiKey
+
+    fun effectiveGoogleWebClientId(fallback: String? = null): String {
+        return googleWebClientId.takeIf { it.isNotBlank() }
+            ?: fallback?.takeIf { it.isNotBlank() }
+            ?: ""
+    }
 }
 
 private fun parseUnsplashQuery(url: String): String? {

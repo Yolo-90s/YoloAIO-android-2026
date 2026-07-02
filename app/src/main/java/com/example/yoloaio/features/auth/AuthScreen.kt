@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import com.example.yoloaio.R
 import com.example.yoloaio.data.LocalAppConfig
 import com.example.yoloaio.ui.components.GlassCard
 import kotlinx.coroutines.launch
@@ -184,15 +185,17 @@ fun AuthScreen(onAuthenticated: () -> Unit) {
                             error = "Couldn't find an Activity to host Google sign-in."
                             return@GoogleSignInButton
                         }
-                        if (appConfig.googleWebClientId.isBlank()) {
-                            error = "Google sign-in not configured. Ask the admin to set " +
-                                "`googleWebClientId` in the Firestore config/app document."
+                        val effectiveGoogleWebClientId = appConfig.effectiveGoogleWebClientId(
+                            context.getString(R.string.default_web_client_id)
+                        )
+                        if (effectiveGoogleWebClientId.isBlank()) {
+                            error = "Google sign-in is not configured for this build. Verify your Google services config and Firestore config/app document."
                             return@GoogleSignInButton
                         }
                         error = null
                         loading = true
                         scope.launch {
-                            val result = repo.signInWithGoogle(activity, appConfig.googleWebClientId)
+                            val result = repo.signInWithGoogle(activity, effectiveGoogleWebClientId)
                             loading = false
                             result
                                 .onSuccess { onAuthenticated() }
