@@ -1,0 +1,150 @@
+// REFERENCE COPY — not the deploy source.
+//
+// This Firestore project (yolohome-c2ce4, see app/google-services.json) is
+// shared between Yolo-Home and YoloAIO — one Firestore database behind
+// both apps. The rules file that actually deploys lives at
+// ../Yolo-Homes-Android/firestore.rules (wired up via that repo's
+// firebase.json + `firebase deploy --only firestore:rules`). This copy is
+// kept here purely so YoloAIO's own rules are visible from this repo —
+// edit the Yolo-Homes-Android copy (and copy the change back here) rather
+// than editing this file in isolation, or the two will drift out of sync.
+
+rules_version = '2';
+
+// Shared by Yolo-Home (apartment app) and YoloAIO (all-in-one).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.admin == true ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'developer']
+        )
+      );
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ── Shared: user profile (used by BOTH apps) ─────────────────────
+    // Outer read/write semantics match Yolo-Home's existing rule exactly.
+    // YoloAIO's per-user subcollections live inside.
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(uid);
+
+      // YoloAIO private subcollections — owner only.
+      match /watchHistory/{tmdbId}      { allow read, write: if isOwner(uid); }
+      match /customQuotes/{quoteId}     { allow read, write: if isOwner(uid); }
+      match /favoriteWallpapers/{id}    { allow read, write: if isOwner(uid); }
+      match /favoriteRingtones/{id}     { allow read, write: if isOwner(uid); }
+      match /favoriteTracks/{id}        { allow read, write: if isOwner(uid); }
+      match /favoriteBooks/{id}         { allow read, write: if isOwner(uid); }
+      match /favoriteHairstyles/{id}    { allow read, write: if isOwner(uid); }
+      match /settings/{settingName}     { allow read, write: if isOwner(uid); }
+    }
+
+    // ── Yolo-Home: apartment collections (unchanged) ─────────────────
+    match /appSettings/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /masterFlats/{flatId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /flats/{flatId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /maintenanceSettings/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /maintenanceReceipts/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /readings/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── YoloAIO: chat (1:1 DMs, gated on participants array) ─────────
+    match /chats/{chatId} {
+      allow read:   if isSignedIn() && request.auth.uid in resource.data.participants;
+      allow create: if isSignedIn() && request.auth.uid in request.resource.data.participants;
+      allow update: if isSignedIn() && request.auth.uid in resource.data.participants;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn()
+                     && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow create: if isSignedIn()
+                       && request.auth.uid == request.resource.data.senderId
+                       && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+        allow update, delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    // ── YoloAIO: public quote wall ───────────────────────────────────
+    match /publicQuotes/{id} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+    }
+
+    // ── YoloAIO: community channel ───────────────────────────────────
+    match /communityMessages/{id} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+    }
+
+    // ── YoloAIO: remote feature flags + API keys ─────────────────────
+    // Readable by any signed-in user; writes only via Console (matches
+    // the original YoloAIO rule in FIREBASE_SETUP.md).
+    match /config/{doc} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ── YoloAIO: WalkieTalkie channel codes + WebRTC signaling ────────
+    // Any signed-in user may read a channel doc (to look up a peer's code)
+    // or claim one (create, with themselves as ownerUid). Only the owner
+    // may update/delete the channel doc itself (live flag, heartbeat,
+    // refresh). Session docs (offer/answer) and their ICE-candidate
+    // subcollections are writable by either the receiver (their own uid)
+    // or the channel's owner (the transmitter answering them).
+    match /walkieChannels/{code} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
+
+      match /sessions/{receiverUid} {
+        allow read: if isSignedIn();
+        allow write: if isSignedIn() &&
+          (request.auth.uid == receiverUid ||
+           get(/databases/$(database)/documents/walkieChannels/$(code)).data.ownerUid == request.auth.uid);
+
+        match /{candidateCollection}/{candidateId} {
+          allow read: if isSignedIn();
+          allow write: if isSignedIn() &&
+            (request.auth.uid == receiverUid ||
+             get(/databases/$(database)/documents/walkieChannels/$(code)).data.ownerUid == request.auth.uid);
+        }
+      }
+    }
+  }
+}

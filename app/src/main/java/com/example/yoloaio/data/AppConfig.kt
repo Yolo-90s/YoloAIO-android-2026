@@ -11,6 +11,7 @@ data class AppConfig(
     val showWeatherMenu: Boolean = true,
     val showBooksMenu: Boolean = true,
     val showBeatAnalyserMenu: Boolean = true,
+    val showWalkieTalkieMenu: Boolean = true,
     val unsplashAccessKey: String = "",
     val unsplashSecretKey: String = "",
     val wallpapersUrl: String = "",
@@ -32,7 +33,17 @@ data class AppConfig(
     // instance that allows open conference creation. Set in Firestore
     // `config/app.jitsiServerUrl` — change takes effect on next call,
     // no rebuild needed.
-    val jitsiServerUrl: String = ""
+    val jitsiServerUrl: String = "",
+    // TURN relay for the raw-WebRTC WalkieTalkie feature. Google's public
+    // STUN (stun.l.google.com) is always used as a baseline; these three
+    // fields add a TURN server on top, required for two devices on
+    // different cellular networks to reliably connect (STUN alone often
+    // fails behind carrier-grade NAT). Get a free TURN endpoint from
+    // Metered.ca (or self-host coturn) and set these three in Firestore
+    // `config/app` — no rebuild needed.
+    val turnUrl: String = "",
+    val turnUsername: String = "",
+    val turnCredential: String = ""
 ) {
     val unsplashQuery: String
         get() = parseUnsplashQuery(wallpapersUrl) ?: "nature"

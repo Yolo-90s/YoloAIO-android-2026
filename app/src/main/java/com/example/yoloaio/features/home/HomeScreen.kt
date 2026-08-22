@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.SettingsVoice
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WbCloudy
@@ -113,6 +114,11 @@ private val allTiles = listOf(
         listOf(Color(0xFF42E6B4), Color(0xFF311B92))
     ),
     FeatureTile(
+        "walkie_talkie", "Walkie Talkie", "Live voice · push to talk",
+        Icons.Rounded.SettingsVoice, Routes.WALKIE_TALKIE,
+        listOf(Color(0xFF66BB6A), Color(0xFF1B5E20))
+    ),
+    FeatureTile(
         "audio", "Audio Trimmer", "Cut & save",
         Icons.Rounded.ContentCut, Routes.AUDIO_TRIMMER,
         listOf(Color(0xFFFF7AB6), Color(0xFFB85AC1))
@@ -149,6 +155,7 @@ fun HomeScreen(
             "weather" -> config.showWeatherMenu
             "books" -> config.showBooksMenu
             "beat_analyser" -> config.showBeatAnalyserMenu
+            "walkie_talkie" -> config.showWalkieTalkieMenu
             else -> true
         }
     }

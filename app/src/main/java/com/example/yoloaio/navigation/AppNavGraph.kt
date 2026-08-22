@@ -26,6 +26,7 @@ import com.example.yoloaio.features.movies.TvPlayerScreen
 import com.example.yoloaio.features.music.MusicScreen
 import com.example.yoloaio.features.music.MusicSettingsScreen
 import com.example.yoloaio.features.beat.BeatAnalyserScreen
+import com.example.yoloaio.features.walkietalkie.WalkieTalkieScreen
 import com.example.yoloaio.features.books.BookFavoritesScreen
 import com.example.yoloaio.features.books.BookReaderScreen
 import com.example.yoloaio.features.books.BooksScreen
@@ -262,6 +263,9 @@ fun AppNavGraph(
         }
         composable(Routes.BEAT_ANALYSER) {
             BeatAnalyserScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.WALKIE_TALKIE) {
+            WalkieTalkieScreen(onBack = { navController.popBackStack() })
         }
         composable(Routes.WEATHER) {
             WeatherScreen(onBack = { navController.popBackStack() })

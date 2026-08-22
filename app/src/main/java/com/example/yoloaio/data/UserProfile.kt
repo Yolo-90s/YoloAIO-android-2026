@@ -15,7 +15,10 @@ data class UserProfile(
     // Defaults of 0/0 mean "never recorded".
     val lastLat: Double = 0.0,
     val lastLon: Double = 0.0,
-    val lastLocationAt: Long = 0L
+    val lastLocationAt: Long = 0L,
+    // This user's WalkieTalkie channel code — stable across app opens,
+    // changes only when the user taps Refresh on the WalkieTalkie screen.
+    val walkieId: String = ""
 ) {
     val avatarComposeColor: Color get() = Color(avatarColor.toInt())
     val hasLocation: Boolean get() = lastLocationAt > 0L

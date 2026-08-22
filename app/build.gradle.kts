@@ -118,6 +118,12 @@ dependencies {
     // is the only path Jitsi officially supports for Android calling.
     // Exposes JitsiMeetActivity which we launch via Intent.
     implementation("org.jitsi.react:jitsi-meet-sdk:10.2.0")
+    // NOTE: the raw peer-to-peer WebRTC used by the WalkieTalkie feature
+    // (WalkieTalkieEngine.kt, org.webrtc.* imports) is NOT a separate
+    // dependency — jitsi-meet-sdk already transitively pulls in a full
+    // libwebrtc AAR (org.jitsi:webrtc) that exposes the same org.webrtc.*
+    // package. Adding another WebRTC AAR (e.g. io.getstream:stream-webrtc-android)
+    // here causes duplicate-class merge failures — don't re-add one.
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.coil.compose)
     implementation(libs.androidx.work.runtime.ktx)
