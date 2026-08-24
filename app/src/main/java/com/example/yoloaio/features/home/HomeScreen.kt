@@ -1,29 +1,21 @@
 package com.example.yoloaio.features.home
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
-import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.ContentCut
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.rounded.FormatQuote
@@ -41,22 +33,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.yoloaio.data.LocalAppConfig
 import com.example.yoloaio.data.rememberCurrentUser
 import com.example.yoloaio.navigation.Routes
-import com.example.yoloaio.ui.theme.YoloShapes
+import com.example.yoloaio.ui.components.BentoTile
 
 private data class FeatureTile(
     val key: String,
@@ -193,15 +182,28 @@ fun HomeScreen(
 
             if (tiles.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    HeroTile(
-                        tile = tiles.first(),
-                        onClick = { onTileClick(tiles.first().route) }
+                    val hero = tiles.first()
+                    BentoTile(
+                        title = hero.title,
+                        tagline = hero.tagline,
+                        icon = hero.icon,
+                        accent = hero.accent,
+                        onClick = { onTileClick(hero.route) },
+                        hero = true,
+                        staggerIndex = 0
                     )
                 }
             }
 
-            items(items = tiles.drop(1), key = { it.key }) { tile ->
-                StandardTile(tile = tile, onClick = { onTileClick(tile.route) })
+            itemsIndexed(items = tiles.drop(1), key = { _, tile -> tile.key }) { index, tile ->
+                BentoTile(
+                    title = tile.title,
+                    tagline = tile.tagline,
+                    icon = tile.icon,
+                    accent = tile.accent,
+                    onClick = { onTileClick(tile.route) },
+                    staggerIndex = index + 1
+                )
             }
         }
     }
@@ -243,158 +245,6 @@ private fun GreetingHeader(
                 modifier = Modifier.size(36.dp),
                 tint = MaterialTheme.colorScheme.onSurface
             )
-        }
-    }
-}
-
-@Composable
-private fun HeroTile(tile: FeatureTile, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(180.dp),
-        shape = YoloShapes.Hero,
-        color = Color.Transparent,
-        shadowElevation = 12.dp
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Brush.linearGradient(tile.accent))
-        ) {
-            // Decorative oversized icon in the upper-right — bleeds off the
-            // edge slightly for a magazine-cover feel.
-            Icon(
-                imageVector = tile.icon,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.18f),
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = 16.dp, top = 16.dp)
-                    .size(140.dp)
-            )
-
-            // Foreground content
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.White.copy(alpha = 0.20f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            tile.icon,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        "Featured",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                Column {
-                    Text(
-                        tile.title,
-                        style = MaterialTheme.typography.displaySmall,
-                        color = Color.White
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            tile.tagline,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.85f),
-                            modifier = Modifier.weight(1f)
-                        )
-                        Icon(
-                            Icons.Rounded.ArrowOutward,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StandardTile(tile: FeatureTile, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1f),
-        shape = YoloShapes.Card,
-        color = Color.Transparent,
-        shadowElevation = 8.dp
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Brush.linearGradient(tile.accent))
-        ) {
-            Icon(
-                imageVector = tile.icon,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.16f),
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = 12.dp, top = 12.dp)
-                    .size(80.dp)
-            )
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(Color.White.copy(alpha = 0.20f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        tile.icon,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Column {
-                    Text(
-                        tile.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        tile.tagline,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.85f)
-                    )
-                }
-            }
         }
     }
 }

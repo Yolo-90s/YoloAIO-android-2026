@@ -143,6 +143,11 @@ dependencies {
     implementation(libs.androidx.mediarouter)
     implementation(libs.google.cast.framework)
 
+    // Real cross-API frosted-glass blur for GlassCard/GlassSurface — Compose's
+    // native Modifier.blur()/RenderEffect only works on API 31+, but minSdk is
+    // 24, so we need a library that degrades gracefully below that.
+    implementation(libs.haze)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
