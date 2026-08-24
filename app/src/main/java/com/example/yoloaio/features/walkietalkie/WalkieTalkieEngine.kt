@@ -1,6 +1,7 @@
 package com.example.yoloaio.features.walkietalkie
 
 import android.content.Context
+import android.media.AudioManager
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +66,34 @@ class WalkieTalkieEngine(private val appContext: Context) {
     private var activeCode: String? = null
     private var activeRole: WalkieRole? = null
 
+    private var previousAudioMode: Int? = null
+    private var previousSpeakerphoneOn: Boolean? = null
+
+    /**
+     * WebRTC's JavaAudioDeviceModule plays received audio on the voice-call
+     * stream, which Android routes to the earpiece (near-silent unless held
+     * to your ear) unless the app explicitly asks for speakerphone +
+     * communication mode. Without this, transfer/receive negotiate and
+     * "connect" successfully but nothing audible comes out.
+     */
+    private fun applyCallAudioRouting() {
+        val am = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        if (previousAudioMode == null) {
+            previousAudioMode = am.mode
+            previousSpeakerphoneOn = am.isSpeakerphoneOn
+        }
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
+        am.isSpeakerphoneOn = true
+    }
+
+    private fun restoreAudioRouting() {
+        val am = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        previousAudioMode?.let { am.mode = it }
+        previousSpeakerphoneOn?.let { am.isSpeakerphoneOn = it }
+        previousAudioMode = null
+        previousSpeakerphoneOn = null
+    }
+
     private fun ensureFactory(): PeerConnectionFactory {
         factory?.let { return it }
         PeerConnectionFactory.initialize(
@@ -86,6 +115,7 @@ class WalkieTalkieEngine(private val appContext: Context) {
         activeCode = code
         activeRole = WalkieRole.TRANSMIT
         status = WalkieStatus.Connecting
+        applyCallAudioRouting()
 
         val f = ensureFactory()
         val audioSource = f.createAudioSource(MediaConstraints())
@@ -147,14 +177,21 @@ class WalkieTalkieEngine(private val appContext: Context) {
             return
         }
         transmitConnections[receiverUid] = pc
-        pc.addTransceiver(
-            localTrack,
-            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
-        )
 
         val job = scope.launch {
             try {
                 pc.setRemoteDescriptionSuspend(SessionDescription(SessionDescription.Type.OFFER, offer.sdp))
+                // Attach our mic to the transceiver Unified Plan already
+                // created from the offer's (recvonly) audio m-line — calling
+                // addTransceiver() here instead would add a SECOND,
+                // unnegotiated m-line: ICE/DTLS still connects fine, but no
+                // audio ever flows because the actually-negotiated m-line
+                // never gets a track.
+                val transceiver = pc.transceivers.firstOrNull {
+                    it.receiver.track()?.kind() == "audio"
+                }
+                transceiver?.direction = RtpTransceiver.RtpTransceiverDirection.SEND_ONLY
+                transceiver?.sender?.setTrack(localTrack, false)
                 val answer = pc.createAnswerSuspend(MediaConstraints())
                 pc.setLocalDescriptionSuspend(answer)
                 repository.writeAnswer(code, receiverUid, SdpPayload(answer.description, answer.type.canonicalForm()))
@@ -182,6 +219,7 @@ class WalkieTalkieEngine(private val appContext: Context) {
         activeCode = code
         activeRole = WalkieRole.RECEIVE
         status = WalkieStatus.Connecting
+        applyCallAudioRouting()
 
         receiveJob = scope.launch {
             val channel = repository.fetchChannel(code)
@@ -265,6 +303,8 @@ class WalkieTalkieEngine(private val appContext: Context) {
         localAudioTrack?.setEnabled(false)
         localAudioTrack?.dispose()
         localAudioTrack = null
+
+        restoreAudioRouting()
 
         if (code != null) {
             val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
