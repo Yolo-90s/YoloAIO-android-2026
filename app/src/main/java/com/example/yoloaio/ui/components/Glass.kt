@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -147,6 +148,11 @@ fun Modifier.glassEffect(strong: Boolean = false): Modifier {
     return this.hazeEffect(
         state = hazeState,
         style = HazeStyle(
+            // Required since haze 1.5 — an opaque color drawn behind the
+            // blur itself (composited under it, not a substitute for it).
+            // Without this, HazeEffectNode throws on the very first frame:
+            // "backgroundColor not specified. Please provide a color."
+            backgroundColor = MaterialTheme.colorScheme.background,
             tint = HazeTint(tintColor),
             blurRadius = 20.dp,
             fallbackTint = HazeTint(fallbackColor)
