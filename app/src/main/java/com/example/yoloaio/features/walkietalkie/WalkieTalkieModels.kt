@@ -15,6 +15,7 @@ data class IcePayload(
 
 data class WalkieChannelDoc(
     val ownerUid: String = "",
+    val ownerDisplayName: String = "",
     val createdAt: Timestamp? = null,
     val live: Boolean = false,
     val updatedAt: Timestamp? = null
@@ -23,7 +24,20 @@ data class WalkieChannelDoc(
 data class WalkieSessionDoc(
     val offer: SdpPayload? = null,
     val answer: SdpPayload? = null,
-    val createdAt: Timestamp? = null
+    val createdAt: Timestamp? = null,
+    // True when this session was opened by an admin browsing live channels
+    // (see WalkieTalkieRepository.observeLiveChannels) rather than a
+    // normal Receive-by-code flow. The transmitter's engine excludes
+    // admin-flagged sessions from the listener count it displays — an
+    // admin tuning in doesn't change what the broadcaster sees.
+    val isAdminMonitor: Boolean = false
+)
+
+/** One currently-live channel, as surfaced to an admin browsing them. */
+data class LiveChannel(
+    val code: String = "",
+    val ownerUid: String = "",
+    val ownerDisplayName: String = ""
 )
 
 enum class WalkieRole { TRANSMIT, RECEIVE }

@@ -53,7 +53,14 @@ class WalkieTalkieEngine(private val appContext: Context) {
     private var localAudioTrack: AudioTrack? = null
 
     private val transmitConnections = mutableMapOf<String, PeerConnection>()
+    // receiverUid -> was this session opened by an admin browsing live
+    // channels (WalkieSessionDoc.isAdminMonitor)? Excluded from the
+    // listener count shown to the transmitter — see nonAdminListenerCount().
+    private val adminMonitorFlags = mutableMapOf<String, Boolean>()
     private var receiveConnection: PeerConnection? = null
+
+    private fun nonAdminListenerCount(): Int =
+        transmitConnections.keys.count { adminMonitorFlags[it] != true }
 
     private var sessionsJob: Job? = null
     private var heartbeatJob: Job? = null
@@ -140,14 +147,16 @@ class WalkieTalkieEngine(private val appContext: Context) {
                 val receiverUid = change.document.id
                 when (change.type) {
                     DocumentChange.Type.ADDED, DocumentChange.Type.MODIFIED -> {
-                        if (transmitConnections.containsKey(receiverUid)) continue
                         val doc = change.document.toObject(WalkieSessionDoc::class.java)
+                        adminMonitorFlags[receiverUid] = doc.isAdminMonitor
+                        if (transmitConnections.containsKey(receiverUid)) continue
                         val offer = doc.offer ?: continue
                         answerReceiver(code, receiverUid, offer, f, track, iceServers)
                     }
                     DocumentChange.Type.REMOVED -> {
                         transmitConnections.remove(receiverUid)?.close()
-                        status = WalkieStatus.Live(transmitConnections.size)
+                        adminMonitorFlags.remove(receiverUid)
+                        status = WalkieStatus.Live(nonAdminListenerCount())
                     }
                     else -> Unit
                 }
@@ -195,7 +204,7 @@ class WalkieTalkieEngine(private val appContext: Context) {
                 val answer = pc.createAnswerSuspend(MediaConstraints())
                 pc.setLocalDescriptionSuspend(answer)
                 repository.writeAnswer(code, receiverUid, SdpPayload(answer.description, answer.type.canonicalForm()))
-                status = WalkieStatus.Live(transmitConnections.size)
+                status = WalkieStatus.Live(nonAdminListenerCount())
 
                 repository.observeIceCandidates(code, receiverUid, WalkieRole.RECEIVE).onEach { candidates ->
                     candidates.forEach { pc.addIceCandidate(it.toIceCandidate()) }
@@ -203,6 +212,7 @@ class WalkieTalkieEngine(private val appContext: Context) {
             } catch (e: Exception) {
                 Log.w(tag, "answerReceiver failed for $receiverUid: ${e.message}")
                 transmitConnections.remove(receiverUid)?.close()
+                adminMonitorFlags.remove(receiverUid)
             }
         }
         perReceiverJobs.add(job)
@@ -210,7 +220,7 @@ class WalkieTalkieEngine(private val appContext: Context) {
 
     // ── Receive ──────────────────────────────────────────────────────────
 
-    fun startReceive(code: String, iceServers: List<PeerConnection.IceServer>) {
+    fun startReceive(code: String, iceServers: List<PeerConnection.IceServer>, isAdminMonitor: Boolean = false) {
         stop()
         val me = myUid ?: run {
             status = WalkieStatus.Error("Not signed in")
@@ -261,7 +271,10 @@ class WalkieTalkieEngine(private val appContext: Context) {
             try {
                 val offer = pc.createOfferSuspend(MediaConstraints())
                 pc.setLocalDescriptionSuspend(offer)
-                repository.writeOffer(code, me, SdpPayload(offer.description, offer.type.canonicalForm()))
+                repository.writeOffer(
+                    code, me, SdpPayload(offer.description, offer.type.canonicalForm()),
+                    isAdminMonitor = isAdminMonitor
+                )
 
                 repository.observeSession(code, me).onEach { session ->
                     val answer = session?.answer ?: return@onEach
@@ -297,6 +310,7 @@ class WalkieTalkieEngine(private val appContext: Context) {
 
         transmitConnections.values.forEach { it.close() }
         transmitConnections.clear()
+        adminMonitorFlags.clear()
         receiveConnection?.close()
         receiveConnection = null
 

@@ -63,6 +63,7 @@ class WalkieTalkieRepository {
                         ref,
                         mapOf(
                             "ownerUid" to uid,
+                            "ownerDisplayName" to (auth.currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "Unknown"),
                             "createdAt" to FieldValue.serverTimestamp(),
                             "live" to false
                         )
@@ -99,6 +100,52 @@ class WalkieTalkieRepository {
         channelsCol().document(code).get().await().toObject(WalkieChannelDoc::class.java)
     }.getOrNull()
 
+    /**
+     * True if the signed-in user's own `users/{uid}` doc has an admin
+     * role — mirrors the `isAdmin()` check in firestore.rules exactly
+     * (`role in ['admin','developer']`), so this is a UI-convenience read,
+     * not the actual security boundary (the rules enforce that on their
+     * own regardless of what this returns).
+     */
+    suspend fun isCurrentUserAdmin(): Boolean {
+        val me = currentUid ?: return false
+        val role = runCatching {
+            firestore.collection("users").document(me).get().await().getString("role")
+        }.getOrNull()
+        return role == "admin" || role == "developer"
+    }
+
+    /**
+     * Admin-only (enforced by firestore.rules `allow list`): every
+     * channel currently marked `live`, across all users — lets an admin
+     * pick a broadcast to listen to without needing its code. Excludes
+     * the admin's own channel, if it happens to be live.
+     */
+    fun observeLiveChannels(): Flow<List<LiveChannel>> = callbackFlow {
+        val me = currentUid
+        val registration = channelsCol()
+            .whereEqualTo("live", true)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+                val channels = snap?.documents
+                    ?.filter { it.getString("ownerUid") != me }
+                    ?.map { doc ->
+                        LiveChannel(
+                            code = doc.id,
+                            ownerUid = doc.getString("ownerUid").orEmpty(),
+                            ownerDisplayName = doc.getString("ownerDisplayName")
+                                ?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        )
+                    }
+                    ?: emptyList()
+                trySend(channels)
+            }
+        awaitClose { registration.remove() }
+    }
+
     /** Transmitter side: fires whenever a receiver's session doc is added/changed/removed. */
     fun observeSessions(code: String): Flow<List<DocumentChange>> = callbackFlow {
         val registration = sessionsCol(code).addSnapshotListener { snap, err ->
@@ -121,11 +168,17 @@ class WalkieTalkieRepository {
         awaitClose { registration.remove() }
     }
 
-    suspend fun writeOffer(code: String, receiverUid: String, offer: SdpPayload): Result<Unit> = runCatching {
+    suspend fun writeOffer(
+        code: String,
+        receiverUid: String,
+        offer: SdpPayload,
+        isAdminMonitor: Boolean = false
+    ): Result<Unit> = runCatching {
         sessionsCol(code).document(receiverUid).set(
             mapOf(
                 "offer" to mapOf("sdp" to offer.sdp, "type" to offer.type),
-                "createdAt" to FieldValue.serverTimestamp()
+                "createdAt" to FieldValue.serverTimestamp(),
+                "isAdminMonitor" to isAdminMonitor
             )
         ).await()
         Unit

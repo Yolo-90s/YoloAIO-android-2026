@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
@@ -26,11 +25,10 @@ import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.SettingsVoice
 import androidx.compose.material.icons.rounded.SportsEsports
+import androidx.compose.material.icons.rounded.ViewInAr
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material.icons.rounded.WbCloudy
 import androidx.compose.material.icons.rounded.Wifi
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -38,7 +36,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -46,6 +43,7 @@ import com.example.yoloaio.data.LocalAppConfig
 import com.example.yoloaio.data.rememberCurrentUser
 import com.example.yoloaio.navigation.Routes
 import com.example.yoloaio.ui.components.BentoTile
+import com.example.yoloaio.ui.components.Yolo3DIconButton
 
 private data class FeatureTile(
     val key: String,
@@ -108,6 +106,11 @@ private val allTiles = listOf(
         listOf(Color(0xFF66BB6A), Color(0xFF1B5E20))
     ),
     FeatureTile(
+        "three_d_menu", "3D Menu", "An interactive 3D scene",
+        Icons.Rounded.ViewInAr, Routes.THREE_D_MENU,
+        listOf(Color(0xFF9C6BFF), Color(0xFF2A0E61))
+    ),
+    FeatureTile(
         "audio", "Audio Trimmer", "Cut & save",
         Icons.Rounded.ContentCut, Routes.AUDIO_TRIMMER,
         listOf(Color(0xFFFF7AB6), Color(0xFFB85AC1))
@@ -145,6 +148,7 @@ fun HomeScreen(
             "books" -> config.showBooksMenu
             "beat_analyser" -> config.showBeatAnalyserMenu
             "walkie_talkie" -> config.showWalkieTalkieMenu
+            "three_d_menu" -> config.showThreeDMenuMenu
             else -> true
         }
     }
@@ -233,19 +237,12 @@ private fun GreetingHeader(
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
-        IconButton(
+        Yolo3DIconButton(
             onClick = onAccountClick,
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-        ) {
-            Icon(
-                Icons.Rounded.AccountCircle,
-                contentDescription = "Account & settings",
-                modifier = Modifier.size(36.dp),
-                tint = MaterialTheme.colorScheme.onSurface
-            )
-        }
+            icon = Icons.Rounded.AccountCircle,
+            contentDescription = "Account & settings",
+            modifier = Modifier.size(44.dp)
+        )
     }
 }
 

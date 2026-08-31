@@ -121,14 +121,22 @@ service cloud.firestore {
     }
 
     // ── YoloAIO: WalkieTalkie channel codes + WebRTC signaling ────────
-    // Any signed-in user may read a channel doc (to look up a peer's code)
-    // or claim one (create, with themselves as ownerUid). Only the owner
-    // may update/delete the channel doc itself (live flag, heartbeat,
-    // refresh). Session docs (offer/answer) and their ICE-candidate
-    // subcollections are writable by either the receiver (their own uid)
-    // or the channel's owner (the transmitter answering them).
+    // Any signed-in user may fetch ONE specific channel doc by code (the
+    // normal Receive flow — you already have the code) or claim one
+    // (create, with themselves as ownerUid). Only admins may LIST/query
+    // the collection (e.g. "all channels where live == true") — this is
+    // what lets the admin-only "live channels" browser in the app find
+    // active broadcasts without already knowing their codes; a non-admin
+    // user cannot discover other people's channels this way even though
+    // they could still join one if told the code directly. Only the
+    // owner may update/delete the channel doc itself (live flag,
+    // heartbeat, refresh). Session docs (offer/answer) and their
+    // ICE-candidate subcollections are writable by either the receiver
+    // (their own uid) or the channel's owner (the transmitter answering
+    // them).
     match /walkieChannels/{code} {
-      allow read: if isSignedIn();
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && isAdmin();
       allow create: if isSignedIn() && request.resource.data.ownerUid == request.auth.uid;
       allow update, delete: if isSignedIn() && resource.data.ownerUid == request.auth.uid;
 

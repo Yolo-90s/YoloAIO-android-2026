@@ -12,6 +12,7 @@ data class AppConfig(
     val showBooksMenu: Boolean = true,
     val showBeatAnalyserMenu: Boolean = true,
     val showWalkieTalkieMenu: Boolean = true,
+    val showThreeDMenuMenu: Boolean = true,
     val unsplashAccessKey: String = "",
     val unsplashSecretKey: String = "",
     val wallpapersUrl: String = "",
@@ -43,7 +44,13 @@ data class AppConfig(
     // `config/app` — no rebuild needed.
     val turnUrl: String = "",
     val turnUsername: String = "",
-    val turnCredential: String = ""
+    val turnCredential: String = "",
+    // Published Spline scene URL (Spline Editor → Export → Public URL,
+    // ends in .splinecontent) rendered full-screen by ThreeDMenuScreen.
+    // Blank by default — the screen shows a "not configured" state rather
+    // than trying to load an empty URL. Set in Firestore `config/app`, no
+    // rebuild needed.
+    val threeDMenuSceneUrl: String = ""
 ) {
     val unsplashQuery: String
         get() = parseUnsplashQuery(wallpapersUrl) ?: "nature"

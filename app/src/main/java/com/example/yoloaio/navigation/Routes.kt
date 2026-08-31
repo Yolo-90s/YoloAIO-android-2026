@@ -36,6 +36,7 @@ object Routes {
     fun bookReader(bookId: String) = "books/$bookId/read"
     const val BEAT_ANALYSER = "beat_analyser"
     const val WALKIE_TALKIE = "walkie_talkie"
+    const val THREE_D_MENU = "three_d_menu"
     const val WEATHER = "weather"
     const val WIFI_LAB = "wifi_lab"
     const val COMMUNITY = "community"

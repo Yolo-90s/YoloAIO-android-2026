@@ -1,6 +1,7 @@
 package com.example.yoloaio.ui.components
 
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -38,11 +39,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.yoloaio.ui.theme.YoloShapes
+
+// Scoped to bento-tile headline text only — NOT applied globally in
+// Type.kt, since a drop-shadow on body/reading text (chat, books, forms)
+// would hurt legibility rather than help "attractiveness."
+private val TITLE_SHADOW = Shadow(
+    color = Color.Black.copy(alpha = 0.35f),
+    offset = Offset(0f, 2f),
+    blurRadius = 6f
+)
 
 /**
  * The app's bento-grid tile — a vivid gradient-fill card with a soft
@@ -81,6 +92,22 @@ fun BentoTile(
         ),
         label = "bentoPress"
     )
+    // Pressing pushes the tile "into" the surface — elevation drops toward
+    // the press-scale shrink, instead of staying a static flat shadow.
+    // Combined with the tilt below, this is what sells "physically
+    // extruded object" rather than "flat card with a shadow behind it."
+    val restElevation = if (hero) 16.dp else 11.dp
+    val pressElevation = if (hero) 6.dp else 4.dp
+    val elevation by animateDpAsState(
+        targetValue = if (pressed) pressElevation else restElevation,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "bentoElevation"
+    )
+
+    // Pointer-tracked 3D tilt — see Tilt3D.kt. Bento tiles get a slightly
+    // wider range than Glass cards since they're bold hero branding, not
+    // dense content surfaces.
+    val tiltModifier = Modifier.tilt3D(maxTiltDeg = if (hero) 5f else 7f)
 
     var entranceTarget by remember { mutableFloatStateOf(if (staggerIndex >= 0) 0f else 1f) }
     val entrance by animateFloatAsState(
@@ -106,6 +133,7 @@ fun BentoTile(
         interactionSource = interactionSource,
         modifier = modifier
             .then(sizeModifier)
+            .then(tiltModifier)
             .graphicsLayer {
                 scaleX = pressScale
                 scaleY = pressScale
@@ -114,7 +142,7 @@ fun BentoTile(
             },
         shape = if (hero) YoloShapes.Hero else YoloShapes.Card,
         color = Color.Transparent,
-        shadowElevation = if (hero) 12.dp else 8.dp
+        shadowElevation = elevation
     ) {
         Box(
             modifier = Modifier
@@ -133,6 +161,20 @@ fun BentoTile(
                             colors = listOf(Color.White.copy(alpha = 0.20f), Color.Transparent),
                             start = Offset.Zero,
                             end = Offset(0f, if (hero) 320f else 200f)
+                        )
+                    )
+            )
+            // Bottom-edge inner shadow — paired with the top highlight above,
+            // this is what reads as "the surface curves away from the light"
+            // (embossed/extruded) instead of "flat card, shadow behind it."
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.22f)),
+                            startY = if (hero) 100f else 60f,
+                            endY = if (hero) 340f else 220f
                         )
                     )
             )
@@ -163,7 +205,11 @@ fun BentoTile(
                         )
                     }
                     Column {
-                        Text(title, style = MaterialTheme.typography.displaySmall, color = Color.White)
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.displaySmall.copy(shadow = TITLE_SHADOW),
+                            color = Color.White
+                        )
                         Spacer(Modifier.height(2.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -190,7 +236,7 @@ fun BentoTile(
                     Column {
                         Text(
                             title,
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleLarge.copy(shadow = TITLE_SHADOW),
                             color = Color.White,
                             fontWeight = FontWeight.Bold
                         )

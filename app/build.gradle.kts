@@ -148,6 +148,13 @@ dependencies {
     // 24, so we need a library that degrades gracefully below that.
     implementation(libs.haze)
 
+    // Spline 3D runtime — renders the interactive 3D scene in
+    // ThreeDMenuScreen. Not in the version catalog: Spline's own docs
+    // specify a floating "+" version so the app always tracks their latest
+    // runtime build (their public Android API is still young — no
+    // load-callback or object-tap API yet, see ThreeDMenuScreen.kt).
+    implementation("design.spline:spline-runtime:+")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

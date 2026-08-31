@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -54,6 +55,11 @@ fun GlassCard(
     val hazeModifier = Modifier.glassEffect(strong)
     val border = BorderStroke(0.5.dp, hairlineColor())
     val shadow = if (strong) 10.dp else 4.dp
+    // Only genuinely clickable cards get the pointer-tilt affordance — a
+    // static info card tilting under a touch would imply interactivity
+    // that isn't there. Smaller angle than BentoTile: these are dense
+    // content surfaces (chat/settings/profile cards), not hero branding.
+    val tiltModifier = if (onClick != null) Modifier.tilt3D(maxTiltDeg = if (strong) 3f else 4f) else Modifier
 
     val body: @Composable () -> Unit = {
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -66,6 +72,7 @@ fun GlassCard(
                         .background(Brush.horizontalGradient(accentColors))
                 )
             }
+            GlassDepthOverlay()
             Box(modifier = Modifier.padding(contentPadding)) { content() }
         }
     }
@@ -73,7 +80,7 @@ fun GlassCard(
     if (onClick != null) {
         Surface(
             onClick = onClick,
-            modifier = modifier.then(hazeModifier),
+            modifier = modifier.then(hazeModifier).then(tiltModifier),
             shape = shape,
             color = Color.Transparent,
             shadowElevation = shadow,
@@ -93,6 +100,38 @@ fun GlassCard(
 }
 
 /**
+ * The same paired top-highlight/bottom-shadow depth cue [BentoTile] uses,
+ * scaled down for glass surfaces — very faint so it doesn't fight the
+ * frosted blur/tint underneath, just enough to read as "curved surface"
+ * rather than "flat pane with a border."
+ */
+@Composable
+private fun GlassDepthOverlay() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(Color.White.copy(alpha = 0.08f), Color.Transparent),
+                    startY = 0f,
+                    endY = 80f
+                )
+            )
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.10f)),
+                    startY = 40f,
+                    endY = 140f
+                )
+            )
+    )
+}
+
+/**
  * Thin variant for chrome — a glass surface without inner padding, so the
  * caller can draw flush content (top app bars, full-width rows, etc.). Same
  * real translucency as [GlassCard].
@@ -108,16 +147,24 @@ fun GlassSurface(
     val hazeModifier = Modifier.glassEffect(strong)
     val border = BorderStroke(0.5.dp, hairlineColor())
     val shadow = if (strong) 8.dp else 3.dp
+    val tiltModifier = if (onClick != null) Modifier.tilt3D(maxTiltDeg = if (strong) 3f else 4f) else Modifier
+
+    val body: @Composable () -> Unit = {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            GlassDepthOverlay()
+            content()
+        }
+    }
 
     if (onClick != null) {
         Surface(
             onClick = onClick,
-            modifier = modifier.then(hazeModifier),
+            modifier = modifier.then(hazeModifier).then(tiltModifier),
             shape = shape,
             color = Color.Transparent,
             shadowElevation = shadow,
             border = border,
-            content = content
+            content = body
         )
     } else {
         Surface(
@@ -126,7 +173,7 @@ fun GlassSurface(
             color = Color.Transparent,
             shadowElevation = shadow,
             border = border,
-            content = content
+            content = body
         )
     }
 }
