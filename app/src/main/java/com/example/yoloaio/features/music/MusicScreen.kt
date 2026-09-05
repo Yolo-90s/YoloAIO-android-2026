@@ -1104,7 +1104,13 @@ private fun MiniPlayerBar(
         contentPadding = PaddingValues(0.dp),
         strong = true,
         onClick = onExpand,
-        accentColors = gradientFor(track.id)
+        accentColors = gradientFor(track.id),
+        // This card hosts its own Play/Pause/Next buttons — the tilt reads
+        // pointer position over the whole card regardless of which button
+        // is tapped, so every playback tap was visibly wobbling the mini
+        // player. Off here; the tap-to-expand behavior on the rest of the
+        // bar is unaffected.
+        enableTilt = false
     ) {
         Column {
             Row(

@@ -3,6 +3,7 @@ package com.example.yoloaio.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,6 +42,13 @@ import dev.chrisbanes.haze.hazeEffect
  * - `accentColors` (optional) paints a thin gradient stripe at the very top
  *   of the card — gives the hero / featured cards a distinctive "branded"
  *   edge without overwhelming the surface.
+ * - `enableTilt` (default `true`) — set `false` when the card hosts its
+ *   own interactive children (e.g. play/pause/skip buttons in a mini
+ *   player). The tilt reads raw pointer position over the *whole* card
+ *   regardless of which child actually consumes the tap, so a button
+ *   tapped inside a tilting card visibly wobbles the entire card on every
+ *   press — jarring on something tapped repeatedly, unlike a plain
+ *   tap-to-navigate card.
  */
 @Composable
 fun GlassCard(
@@ -50,6 +58,7 @@ fun GlassCard(
     strong: Boolean = false,
     accentColors: List<Color>? = null,
     contentPadding: PaddingValues = PaddingValues(16.dp),
+    enableTilt: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val hazeModifier = Modifier.glassEffect(strong)
@@ -59,7 +68,11 @@ fun GlassCard(
     // static info card tilting under a touch would imply interactivity
     // that isn't there. Smaller angle than BentoTile: these are dense
     // content surfaces (chat/settings/profile cards), not hero branding.
-    val tiltModifier = if (onClick != null) Modifier.tilt3D(maxTiltDeg = if (strong) 3f else 4f) else Modifier
+    val tiltModifier = if (onClick != null && enableTilt) {
+        Modifier.tilt3D(maxTiltDeg = if (strong) 3f else 4f)
+    } else {
+        Modifier
+    }
 
     val body: @Composable () -> Unit = {
         Box(modifier = Modifier.fillMaxWidth()) {
@@ -104,12 +117,26 @@ fun GlassCard(
  * scaled down for glass surfaces — very faint so it doesn't fight the
  * frosted blur/tint underneath, just enough to read as "curved surface"
  * rather than "flat pane with a border."
+ *
+ * Uses [matchParentSize] rather than `fillMaxSize()` — this must be a
+ * `BoxScope` child so it sizes itself to whatever the *other* children
+ * (the real content) end up measuring as. `fillMaxSize()` instead asks to
+ * fill the incoming max constraint outright, which is harmless inside an
+ * unbounded-height container (a LazyColumn/LazyVerticalGrid item, e.g.
+ * AlbumCard/PlaylistCard) but blows the whole card up to the full screen
+ * height wherever a GlassCard sits in a *bounded*-height parent instead —
+ * exactly what happened to the Music mini player, aligned via
+ * `Box(Alignment.BottomCenter)` at the screen root: the overlay claimed
+ * the full remaining screen height, the Surface/Box around it grew to
+ * match (a Box sizes to the largest child), and the real content (track
+ * row + progress bar) just sat at the top of that now-oversized card,
+ * leaving the rest as a big empty glass panel.
  */
 @Composable
-private fun GlassDepthOverlay() {
+private fun BoxScope.GlassDepthOverlay() {
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .matchParentSize()
             .background(
                 Brush.verticalGradient(
                     colors = listOf(Color.White.copy(alpha = 0.08f), Color.Transparent),
@@ -120,7 +147,7 @@ private fun GlassDepthOverlay() {
     )
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .matchParentSize()
             .background(
                 Brush.verticalGradient(
                     colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.10f)),
@@ -142,12 +169,17 @@ fun GlassSurface(
     shape: Shape = YoloShapes.Card,
     strong: Boolean = false,
     onClick: (() -> Unit)? = null,
+    enableTilt: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val hazeModifier = Modifier.glassEffect(strong)
     val border = BorderStroke(0.5.dp, hairlineColor())
     val shadow = if (strong) 8.dp else 3.dp
-    val tiltModifier = if (onClick != null) Modifier.tilt3D(maxTiltDeg = if (strong) 3f else 4f) else Modifier
+    val tiltModifier = if (onClick != null && enableTilt) {
+        Modifier.tilt3D(maxTiltDeg = if (strong) 3f else 4f)
+    } else {
+        Modifier
+    }
 
     val body: @Composable () -> Unit = {
         Box(modifier = Modifier.fillMaxWidth()) {
