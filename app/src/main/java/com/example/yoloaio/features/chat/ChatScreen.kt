@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -45,6 +46,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,56 +58,63 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.example.yoloaio.data.UserProfile
 import com.example.yoloaio.data.rememberCurrentUser
+import com.example.yoloaio.features.mindmatch.MindMatchRepository
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-
-/** Top-of-screen filter pills. We deliberately don't ship Unread / Groups /
- *  Favorites here — the app doesn't track unread state, has no group concept
- *  beyond Community, and has no favorites store. Shipping fake tabs would
- *  feel half-finished. These three are real and useful. */
-private enum class ChatFilter(val label: String) {
-    All("All"),
-    Active("Active"),
-    Recent("Recent")
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     onBack: () -> Unit,
     onUserClick: (String) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenMindMatch: (code: String) -> Unit
 ) {
     val repo = remember { ChatRepository() }
+    val mindMatchRepo = remember { MindMatchRepository() }
+    val scope = rememberCoroutineScope()
     val previews by repo.observeChatPreviews().collectAsState(initial = emptyList())
     val me by rememberCurrentUser()
 
-    var query by remember { mutableStateOf("") }
-    var filter by remember { mutableStateOf(ChatFilter.All) }
-
-    val filtered by remember(previews, query, filter) {
-        derivedStateOf {
-            val now = System.currentTimeMillis()
-            val activeWindow = 30L * 60 * 1000   // 30 min
-            previews
-                .filter {
-                    when (filter) {
-                        ChatFilter.All -> true
-                        ChatFilter.Active -> it.user.lastLocationAt > 0L &&
-                            now - it.user.lastLocationAt < activeWindow
-                        ChatFilter.Recent -> it.lastTimeMs > 0L
-                    }
-                }
-                .filter {
-                    val q = query.trim().lowercase()
-                    if (q.isBlank()) true else
-                        it.user.displayName.lowercase().contains(q) ||
-                            it.user.email.lowercase().contains(q)
+    // One-tap "create a session + invite this person" shortcut from a
+    // contact row. Claiming/answering happens once inside
+    // MindMatchSessionScreen, same as every other entry point.
+    fun inviteToMindMatch(otherUid: String) {
+        scope.launch {
+            mindMatchRepo.createSession()
+                .onSuccess { code ->
+                    repo.sendMindMatchInvite(otherUid, code)
+                    onOpenMindMatch(code)
                 }
         }
     }
+
+    var query by remember { mutableStateOf("") }
+    val hasQuery = query.isNotBlank()
+
+    // No more "browse every registered user" default — that leaked everyone
+    // who's ever signed into the app onto the first screen. Default view is
+    // just your own conversations (chats you've actually exchanged a
+    // message in); typing in the search bar is now the only way to look up
+    // someone new, searching the full directory by name/email, and tapping
+    // a result opens (or lazily starts) that conversation.
+    val conversations by remember(previews) {
+        derivedStateOf { previews.filter { it.lastTimeMs > 0L } }
+    }
+    val searchResults by remember(previews, query) {
+        derivedStateOf {
+            val q = query.trim().lowercase()
+            if (q.isBlank()) emptyList()
+            else previews.filter {
+                it.user.displayName.lowercase().contains(q) ||
+                    it.user.email.lowercase().contains(q)
+            }
+        }
+    }
+    val displayed = if (hasQuery) searchResults else conversations
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -145,7 +154,7 @@ fun ChatScreen(
                         ?: me?.email?.substringBefore('@')
                         ?: "Friend",
                     onAvatarClick = onOpenSettings,
-                    chatCount = previews.size
+                    chatCount = conversations.size
                 )
             }
             item("search") {
@@ -155,18 +164,16 @@ fun ChatScreen(
                     onClear = { query = "" }
                 )
             }
-            item("tabs") {
-                FilterTabs(current = filter, onChange = { filter = it })
-            }
-            if (filtered.isEmpty()) {
+            if (displayed.isEmpty()) {
                 item("empty") {
-                    EmptyState(query = query, filter = filter)
+                    EmptyState(query = query, hasQuery = hasQuery)
                 }
             } else {
-                items(filtered, key = { it.user.uid }) { preview ->
+                items(displayed, key = { it.user.uid }) { preview ->
                     ChatPreviewCard(
                         preview = preview,
-                        onClick = { onUserClick(preview.user.uid) }
+                        onClick = { onUserClick(preview.user.uid) },
+                        onInviteToMindMatch = { inviteToMindMatch(preview.user.uid) }
                     )
                 }
             }
@@ -212,8 +219,8 @@ private fun GreetingHero(user: String, onAvatarClick: () -> Unit, chatCount: Int
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                if (chatCount > 0) "$chatCount people to chat with"
-                else "No one to chat with yet",
+                if (chatCount > 0) "$chatCount conversation${if (chatCount == 1) "" else "s"}"
+                else "No conversations yet",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -284,7 +291,7 @@ private fun FloatingSearchBar(
             decorationBox = { inner ->
                 if (query.isEmpty()) {
                     Text(
-                        "Search conversations",
+                        "Search by name or email",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -308,59 +315,14 @@ private fun FloatingSearchBar(
     }
 }
 
-// ─────────────────────── tabs ───────────────────────
-
-@Composable
-private fun FilterTabs(current: ChatFilter, onChange: (ChatFilter) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        ChatFilter.entries.forEach { f ->
-            FilterChip(
-                label = f.label,
-                selected = f == current,
-                onClick = { onChange(f) }
-            )
-        }
-    }
-}
-
-@Composable
-private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val bg = if (selected) Brush.linearGradient(listOf(primary, tertiary))
-    else Brush.linearGradient(
-        listOf(
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-        )
-    )
-    val fg = if (selected) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurfaceVariant
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(bg)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        Text(
-            label,
-            color = fg,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-        )
-    }
-}
-
 // ─────────────────────── card ───────────────────────
 
 @Composable
-private fun ChatPreviewCard(preview: ChatPreview, onClick: () -> Unit) {
+private fun ChatPreviewCard(
+    preview: ChatPreview,
+    onClick: () -> Unit,
+    onInviteToMindMatch: () -> Unit
+) {
     val user = preview.user
     val hasChat = preview.lastTimeMs > 0L
     val accent = gradientForUser(user.uid)
@@ -411,6 +373,14 @@ private fun ChatPreviewCard(preview: ChatPreview, onClick: () -> Unit) {
                     maxLines = 1
                 )
             }
+            IconButton(onClick = onInviteToMindMatch) {
+                Icon(
+                    Icons.Rounded.Psychology,
+                    contentDescription = "Invite to MindMatch",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }
@@ -457,7 +427,7 @@ private fun AvatarWithStatus(
 // ─────────────────────── empty / fab ───────────────────────
 
 @Composable
-private fun EmptyState(query: String, filter: ChatFilter) {
+private fun EmptyState(query: String, hasQuery: Boolean) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -465,25 +435,21 @@ private fun EmptyState(query: String, filter: ChatFilter) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
-            Icons.Rounded.Forum,
+            if (hasQuery) Icons.Rounded.Search else Icons.Rounded.Forum,
             contentDescription = null,
             modifier = Modifier.size(56.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            when {
-                query.isNotBlank() -> "No matches for \"$query\""
-                filter == ChatFilter.Active -> "No one's active right now"
-                filter == ChatFilter.Recent -> "No recent conversations"
-                else -> "No one to chat with yet"
-            },
+            if (hasQuery) "No matches for \"$query\"" else "No conversations yet",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            "Sign up another account on a second device to see them here.",
+            if (hasQuery) "Try a different name or email."
+            else "Search for someone by name or email to start a conversation.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.widthIn(max = 280.dp)
