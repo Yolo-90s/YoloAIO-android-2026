@@ -68,11 +68,20 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 import android.app.Activity
 import android.widget.Toast
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import com.example.yoloaio.BuildConfig
+import com.example.yoloaio.data.AppConfigRepository
 import com.example.yoloaio.data.AppUpdateChecker
+import com.example.yoloaio.data.LocalAppConfig
+import com.example.yoloaio.data.LocalUserRole
+import com.example.yoloaio.data.Role
 import com.example.yoloaio.data.UserProfile
 import com.example.yoloaio.data.rememberCurrentUser
 import com.example.yoloaio.features.auth.AuthRepository
+import com.example.yoloaio.features.home.FeatureTile
+import com.example.yoloaio.features.home.allTiles
 import com.example.yoloaio.ui.components.GlassCard
 import com.example.yoloaio.ui.theme.ThemePalette
 import com.example.yoloaio.ui.theme.ThemePreferenceStore
@@ -87,6 +96,8 @@ fun SettingsScreen(
 ) {
     var darkMode by remember { mutableStateOf(false) }
     var notifications by remember { mutableStateOf(true) }
+    val role = LocalUserRole.current
+    val config = LocalAppConfig.current
     val authRepo = remember { AuthRepository() }
     val user by rememberCurrentUser()
     // Bump this on any successful profile edit so the derived displayName /
@@ -199,6 +210,11 @@ fun SettingsScreen(
                         accent = listOf(Color(0xFF00BFA5), Color(0xFF1B5E20))
                     ) { }
                 }
+            }
+
+            if (role >= Role.ADMIN) {
+                SectionLabel("Menu Access")
+                MenuAccessSection(config = config)
             }
 
             SectionLabel("Appearance")
@@ -366,6 +382,69 @@ private fun SectionLabel(text: String) {
         fontWeight = FontWeight.Bold,
         modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 2.dp)
     )
+}
+
+/**
+ * Admin-only: who can see each Home menu tile. GUEST/USER/ADMIN here are
+ * "minimum role required" — picking "Members" means USER-and-above can
+ * see it (ADMIN/DEVELOPER always can, regardless of this screen, so
+ * there's no "Admins can't see this" footgun). Writes go straight to
+ * Firestore (`config/app.menuMinRole.<key>`) and every signed-in device
+ * picks up the change live via the existing config listener — no rebuild.
+ */
+@Composable
+private fun MenuAccessSection(config: com.example.yoloaio.data.AppConfig) {
+    val scope = rememberCoroutineScope()
+    val repo = remember { AppConfigRepository() }
+
+    GlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(0.dp)
+    ) {
+        Column {
+            allTiles.forEachIndexed { index, tile ->
+                if (index > 0) DividerLine()
+                MenuAccessRow(
+                    tile = tile,
+                    current = config.minRoleFor(tile.key),
+                    onSelect = { newRole ->
+                        scope.launch { repo.setMenuMinRole(tile.key, newRole) }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuAccessRow(tile: FeatureTile, current: Role, onSelect: (Role) -> Unit) {
+    val options = listOf(
+        Role.GUEST to "Everyone",
+        Role.USER to "Members",
+        Role.ADMIN to "Admins only"
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(tile.icon, tile.accent)
+            Spacer(Modifier.size(14.dp))
+            Text(tile.title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(8.dp))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            options.forEachIndexed { index, (optionRole, label) ->
+                SegmentedButton(
+                    selected = current == optionRole,
+                    onClick = { onSelect(optionRole) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    label = { Text(label, style = MaterialTheme.typography.labelSmall) }
+                )
+            }
+        }
+    }
 }
 
 @Composable

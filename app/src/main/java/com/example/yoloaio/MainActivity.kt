@@ -20,9 +20,11 @@ import androidx.lifecycle.lifecycleScope
 import com.example.yoloaio.cast.CastManager
 import com.example.yoloaio.data.AppUpdateChecker
 import com.example.yoloaio.data.LocalAppConfig
+import com.example.yoloaio.data.LocalUserRole
 import com.example.yoloaio.data.LocationPresence
 import com.example.yoloaio.data.UserSession
 import com.example.yoloaio.data.rememberAppConfig
+import com.example.yoloaio.data.rememberUserRole
 import com.example.yoloaio.navigation.AppNavGraph
 import com.example.yoloaio.notifications.ChatNotifications
 import com.example.yoloaio.notifications.NotificationChannels
@@ -77,6 +79,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val config by rememberAppConfig()
+            val role by rememberUserRole()
             val palette by rememberThemePalette()
             // Show the 3-second cyberpunk decryption splash on first
             // composition. The nav graph mounts immediately underneath
@@ -84,7 +87,7 @@ class MainActivity : ComponentActivity() {
             // config) finishes during the animation.
             var splashDone by remember { mutableStateOf(false) }
             YoloAIOTheme(palette = palette) {
-                CompositionLocalProvider(LocalAppConfig provides config) {
+                CompositionLocalProvider(LocalAppConfig provides config, LocalUserRole provides role) {
                     AppBackground {
                         AppNavGraph(
                             deepLinkChatPartnerUid = deepLinkChatPartnerUid,
