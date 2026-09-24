@@ -13,6 +13,7 @@ data class AppConfig(
     val showBeatAnalyserMenu: Boolean = true,
     val showWalkieTalkieMenu: Boolean = true,
     val showThreeDMenuMenu: Boolean = true,
+    val showMindMatchMenu: Boolean = true,
     val unsplashAccessKey: String = "",
     val unsplashSecretKey: String = "",
     val wallpapersUrl: String = "",
@@ -50,7 +51,14 @@ data class AppConfig(
     // Blank by default — the screen shows a "not configured" state rather
     // than trying to load an empty URL. Set in Firestore `config/app`, no
     // rebuild needed.
-    val threeDMenuSceneUrl: String = ""
+    val threeDMenuSceneUrl: String = "",
+    // Minimum Role (by wireValue: "guest"/"user"/"admin") required to see
+    // each Home menu tile, keyed by the tile's `key` (e.g. "movies") — see
+    // HomeScreen.kt's `allTiles`. Admin-editable from Settings → Menu
+    // Access. A key absent from this map falls back to DEFAULT_MIN_ROLE,
+    // then USER. ADMIN/DEVELOPER always see every tile regardless of this
+    // map — see AppConfig.minRoleFor's callers.
+    val menuMinRole: Map<String, String> = emptyMap()
 ) {
     val unsplashQuery: String
         get() = parseUnsplashQuery(wallpapersUrl) ?: "nature"
@@ -66,6 +74,24 @@ data class AppConfig(
         return googleWebClientId.takeIf { it.isNotBlank() }
             ?: fallback?.takeIf { it.isNotBlank() }
             ?: ""
+    }
+
+    /** The minimum [Role] required to see the Home tile with this [key]. */
+    fun minRoleFor(key: String): Role {
+        menuMinRole[key]?.let { return Role.fromWire(it) }
+        return DEFAULT_MIN_ROLE[key] ?: Role.USER
+    }
+
+    companion object {
+        // Menus that don't follow the blanket "USER sees everything else"
+        // default: the basics stay open to GUEST, and the experimental 3D
+        // Menu starts admin-only until an admin chooses to open it up.
+        private val DEFAULT_MIN_ROLE = mapOf(
+            "movies" to Role.GUEST,
+            "music" to Role.GUEST,
+            "chat" to Role.GUEST,
+            "three_d_menu" to Role.ADMIN
+        )
     }
 }
 

@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.Gif
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.AlertDialog
@@ -108,7 +109,8 @@ private val emojiSet = listOf(
 fun ChatConversationScreen(
     userId: String,
     onBack: () -> Unit,
-    onOpenProfile: (uid: String) -> Unit
+    onOpenProfile: (uid: String) -> Unit,
+    onOpenMindMatch: (code: String) -> Unit
 ) {
     val repo = remember { ChatRepository() }
     val scope = rememberCoroutineScope()
@@ -403,6 +405,7 @@ fun ChatConversationScreen(
                                     ctx, room, video, jitsiServerUrl
                                 )
                             },
+                            onJoinMindMatch = onOpenMindMatch,
                             onRefreshLocation = { messageId ->
                                 shareCurrentLocation(refreshMessageId = messageId)
                             },
@@ -600,6 +603,7 @@ private fun MessageBubble(
     isFirstInGroup: Boolean,
     isLastInGroup: Boolean,
     onJoinCall: (roomName: String, video: Boolean) -> Unit,
+    onJoinMindMatch: (code: String) -> Unit,
     onRefreshLocation: (messageId: String) -> Unit,
     onOpenLocation: (lat: Double, lon: Double) -> Unit
 ) {
@@ -643,6 +647,14 @@ private fun MessageBubble(
                 onJoin = {
                     msg.callRoom?.takeIf { it.isNotBlank() }
                         ?.let { onJoinCall(it, msg.callVideo) }
+                }
+            )
+            ChatMessageDoc.TYPE_MINDMATCH -> MindMatchInviteBubble(
+                fromMe = fromMe,
+                shape = shape,
+                onJoin = {
+                    msg.mindMatchCode?.takeIf { it.isNotBlank() }
+                        ?.let { onJoinMindMatch(it) }
                 }
             )
             ChatMessageDoc.TYPE_LOCATION -> LocationBubble(
@@ -847,6 +859,49 @@ private fun CallInviteBubble(
             )
             Text(
                 "Tap to join",
+                color = fg.copy(alpha = 0.85f),
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun MindMatchInviteBubble(
+    fromMe: Boolean,
+    shape: RoundedCornerShape,
+    onJoin: () -> Unit
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val fg = if (fromMe) MaterialTheme.colorScheme.onPrimary
+    else MaterialTheme.colorScheme.onSurface
+    val bgModifier = if (fromMe) {
+        Modifier.background(Brush.linearGradient(listOf(primary, tertiary)))
+    } else {
+        Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
+    }
+
+    Row(
+        modifier = Modifier
+            .widthIn(max = 260.dp)
+            .clip(shape)
+            .then(bgModifier)
+            .clickable(onClick = onJoin)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Rounded.Psychology, contentDescription = null, tint = fg, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(
+                "MindMatch invite",
+                color = fg,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Tap to play",
                 color = fg.copy(alpha = 0.85f),
                 style = MaterialTheme.typography.labelSmall
             )

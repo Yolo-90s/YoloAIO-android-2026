@@ -24,6 +24,9 @@ data class ChatMessageDoc(
     val locLat: Double = 0.0,
     val locLon: Double = 0.0,
     val locUpdatedAt: Long = 0L,
+    // Populated only when [type] is TYPE_MINDMATCH — the pairing code the
+    // recipient taps into to join the sender's MindMatch session.
+    val mindMatchCode: String? = null,
     @ServerTimestamp val timestamp: Timestamp? = null
 ) {
     companion object {
@@ -32,6 +35,7 @@ data class ChatMessageDoc(
         const val TYPE_GIF = "gif"
         const val TYPE_CALL = "call"
         const val TYPE_LOCATION = "location"
+        const val TYPE_MINDMATCH = "mindmatch"
     }
 }
 

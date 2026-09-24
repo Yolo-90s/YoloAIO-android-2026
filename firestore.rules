@@ -113,11 +113,12 @@ service cloud.firestore {
     }
 
     // ── YoloAIO: remote feature flags + API keys ─────────────────────
-    // Readable by any signed-in user; writes only via Console (matches
-    // the original YoloAIO rule in FIREBASE_SETUP.md).
+    // Readable by any signed-in user. Writes are admin-only — used by the
+    // in-app "Menu Access" settings panel (config/app.menuMinRole), which
+    // needs real write access unlike the original Console-only rule.
     match /config/{doc} {
       allow read: if isSignedIn();
-      allow write: if false;
+      allow write: if isAdmin();
     }
 
     // ── YoloAIO: WalkieTalkie channel codes + WebRTC signaling ────────
@@ -153,6 +154,53 @@ service cloud.firestore {
              get(/databases/$(database)/documents/walkieChannels/$(code)).data.ownerUid == request.auth.uid);
         }
       }
+    }
+
+    // ── YoloAIO: MindMatch pairing codes + quiz answers ───────────────
+    // A session doc is created by exactly one host (create requires
+    // hostUid == the writer, guestUid == ''). A second person may claim
+    // the open guest slot exactly once (guestUid must currently be blank,
+    // the claimant can't be the host, and the claim may only touch
+    // guestUid/guestDisplayName/updatedAt — not either answers array).
+    // After that, the host may only write hostAnswers (+ updatedAt) and
+    // the guest may only write guestAnswers (+ updatedAt) — each side is
+    // structurally unable to touch the other's answer field. This is not
+    // airtight against a party re-submitting their OWN answers a second
+    // time (same pragmatic level as walkieChannels' owner being able to
+    // rewrite `live`/heartbeat anytime) — that's prevented client-side by
+    // UI state, not by the rules. No `list` — codes are shared out of
+    // band (chat invite / typed in), never browsed.
+    match /mindMatchSessions/{code} {
+      allow get: if isSignedIn();
+      allow list: if false;
+
+      allow create: if isSignedIn()
+        && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.guestUid == ''
+        && request.resource.data.hostAnswers == []
+        && request.resource.data.guestAnswers == [];
+
+      allow update: if isSignedIn() && (
+        (
+          resource.data.guestUid == '' &&
+          request.auth.uid != resource.data.hostUid &&
+          request.resource.data.guestUid == request.auth.uid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['guestUid', 'guestDisplayName', 'updatedAt'])
+        ) ||
+        (
+          request.auth.uid == resource.data.hostUid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['hostAnswers', 'updatedAt'])
+        ) ||
+        (
+          request.auth.uid == resource.data.guestUid &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['guestAnswers', 'updatedAt'])
+        )
+      );
+
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.hostUid;
     }
   }
 }

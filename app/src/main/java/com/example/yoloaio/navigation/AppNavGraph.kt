@@ -28,6 +28,8 @@ import com.example.yoloaio.features.music.MusicSettingsScreen
 import com.example.yoloaio.features.beat.BeatAnalyserScreen
 import com.example.yoloaio.features.walkietalkie.WalkieTalkieScreen
 import com.example.yoloaio.features.threedmenu.ThreeDMenuScreen
+import com.example.yoloaio.features.mindmatch.MindMatchScreen
+import com.example.yoloaio.features.mindmatch.MindMatchSessionScreen
 import com.example.yoloaio.features.books.BookFavoritesScreen
 import com.example.yoloaio.features.books.BookReaderScreen
 import com.example.yoloaio.features.books.BooksScreen
@@ -105,7 +107,8 @@ fun AppNavGraph(
                 onUserClick = { userId ->
                     navController.navigate(Routes.chatConversation(userId))
                 },
-                onOpenSettings = { navController.navigate(Routes.SETTINGS) }
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onOpenMindMatch = { code -> navController.navigate(Routes.mindMatchSession(code)) }
             )
         }
         composable(
@@ -116,7 +119,8 @@ fun AppNavGraph(
             ChatConversationScreen(
                 userId = userId,
                 onBack = { navController.popBackStack() },
-                onOpenProfile = { uid -> navController.navigate(Routes.userProfile(uid)) }
+                onOpenProfile = { uid -> navController.navigate(Routes.userProfile(uid)) },
+                onOpenMindMatch = { code -> navController.navigate(Routes.mindMatchSession(code)) }
             )
         }
         composable(
@@ -270,6 +274,27 @@ fun AppNavGraph(
         }
         composable(Routes.THREE_D_MENU) {
             ThreeDMenuScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Routes.MIND_MATCH) {
+            MindMatchScreen(
+                onBack = { navController.popBackStack() },
+                onOpenSession = { code -> navController.navigate(Routes.mindMatchSession(code)) }
+            )
+        }
+        composable(
+            route = Routes.MIND_MATCH_SESSION,
+            arguments = listOf(navArgument("code") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val code = backStackEntry.arguments?.getString("code").orEmpty()
+            MindMatchSessionScreen(
+                code = code,
+                onBack = { navController.popBackStack() },
+                onPlayAgain = { newCode ->
+                    navController.navigate(Routes.mindMatchSession(newCode)) {
+                        popUpTo(Routes.MIND_MATCH_SESSION) { inclusive = true }
+                    }
+                }
+            )
         }
         composable(Routes.WEATHER) {
             WeatherScreen(onBack = { navController.popBackStack() })

@@ -177,6 +177,40 @@ class ChatRepository {
     }
 
     /**
+     * Drops a "MindMatch invite" into the chat — the recipient sees a
+     * clickable card that joins the sender's already-created session as
+     * the guest. Mirrors [sendCallInvite]'s shape exactly.
+     */
+    suspend fun sendMindMatchInvite(otherUid: String, code: String): Result<Unit> = runCatching {
+        val me = currentUid ?: error("Not signed in")
+        require(code.isNotBlank()) { "code required" }
+
+        val chatId = ChatIds.chatIdFor(me, otherUid)
+        val chatRef = firestore.collection("chats").document(chatId)
+        val previewLabel = "🧠 MindMatch invite"
+
+        chatRef.set(
+            mapOf(
+                "participants" to listOf(me, otherUid).sorted(),
+                "lastMessage" to previewLabel,
+                "lastTime" to FieldValue.serverTimestamp()
+            ),
+            SetOptions.merge()
+        ).await()
+
+        chatRef.collection("messages").add(
+            mapOf(
+                "senderId" to me,
+                "type" to ChatMessageDoc.TYPE_MINDMATCH,
+                "mindMatchCode" to code,
+                "text" to previewLabel,
+                "timestamp" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        Unit
+    }
+
+    /**
      * Drops a "shared location" message into the chat. The recipient sees
      * a clickable card with the coordinates + an Open-in-Maps button. The
      * sender can later refresh via [updateLocation] which overwrites the

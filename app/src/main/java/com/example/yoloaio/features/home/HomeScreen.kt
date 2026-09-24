@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.SettingsVoice
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.ViewInAr
@@ -40,12 +41,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.example.yoloaio.data.LocalAppConfig
+import com.example.yoloaio.data.LocalUserRole
+import com.example.yoloaio.data.Role
 import com.example.yoloaio.data.rememberCurrentUser
 import com.example.yoloaio.navigation.Routes
 import com.example.yoloaio.ui.components.BentoTile
 import com.example.yoloaio.ui.components.Yolo3DIconButton
 
-private data class FeatureTile(
+// `internal` (not `private`) so SettingsScreen's "Menu Access" admin panel
+// can reuse this exact key/title list instead of keeping a second one.
+internal data class FeatureTile(
     val key: String,
     val title: String,
     val tagline: String,
@@ -54,7 +59,7 @@ private data class FeatureTile(
     val accent: List<Color>
 )
 
-private val allTiles = listOf(
+internal val allTiles = listOf(
     FeatureTile(
         "movies", "Movies", "Stream anywhere, instantly",
         Icons.Rounded.Movie, Routes.MOVIES,
@@ -111,6 +116,11 @@ private val allTiles = listOf(
         listOf(Color(0xFF9C6BFF), Color(0xFF2A0E61))
     ),
     FeatureTile(
+        "mindmatch", "MindMatch", "5 questions · see how you match",
+        Icons.Rounded.Psychology, Routes.MIND_MATCH,
+        listOf(Color(0xFFFF7AB6), Color(0xFF6A1B9A))
+    ),
+    FeatureTile(
         "audio", "Audio Trimmer", "Cut & save",
         Icons.Rounded.ContentCut, Routes.AUDIO_TRIMMER,
         listOf(Color(0xFFFF7AB6), Color(0xFFB85AC1))
@@ -138,9 +148,10 @@ fun HomeScreen(
     onUserIconClick: () -> Unit
 ) {
     val config = LocalAppConfig.current
+    val role = LocalUserRole.current
     val user by rememberCurrentUser()
     val tiles = allTiles.filter { tile ->
-        when (tile.key) {
+        val globallyEnabled = when (tile.key) {
             "music" -> config.showMusicMenu
             "movies" -> config.showMoviesMenu
             "wallpaper" -> config.showWallpapersMenu
@@ -149,8 +160,13 @@ fun HomeScreen(
             "beat_analyser" -> config.showBeatAnalyserMenu
             "walkie_talkie" -> config.showWalkieTalkieMenu
             "three_d_menu" -> config.showThreeDMenuMenu
+            "mindmatch" -> config.showMindMatchMenu
             else -> true
         }
+        // ADMIN/DEVELOPER always see every enabled menu, by design — the
+        // per-role visibility matrix (config.menuMinRole, admin-editable
+        // from Settings) only ever restricts GUEST/USER.
+        globallyEnabled && (role >= Role.ADMIN || role >= config.minRoleFor(tile.key))
     }
 
     val firstName = (user?.displayName?.takeIf { it.isNotBlank() } ?: "Friend")
