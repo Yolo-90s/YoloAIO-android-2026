@@ -35,14 +35,24 @@ import kotlinx.coroutines.tasks.await
  * recently backgrounded). It does NOT survive a force-stop / OS-kill. For
  * that you need FCM + a Cloud Function backend, which can layer on top of
  * this code without changing it.
+ *
+ * Generalized for group chats: every identity/suppression/dedup concept that
+ * used to be "the other participant's uid" is now a [chatId]-keyed
+ * `notificationKey` (== the partner uid for a 1:1 chat, == the chatId for a
+ * group) — a 1:1 chat's key happens to equal its partner uid, so behavior
+ * there is unchanged bit-for-bit; only group chats exercise the new path.
  */
 object ChatNotifications {
 
     private const val TAG = "ChatNotifications"
     const val EXTRA_OPEN_CHAT_PARTNER_UID = "openChatWithUid"
+    const val EXTRA_OPEN_GROUP_CHAT_ID = "openGroupChatId"
 
-    /** Set by [com.example.yoloaio.features.chat.ChatConversationScreen] when
-     *  visible. The observer suppresses notifications for this chat. */
+    /** Set by [com.example.yoloaio.features.chat.ChatConversationScreen] /
+     *  [com.example.yoloaio.features.chat.GroupChatScreen] when visible —
+     *  1:1 sets this to the partner's uid, group sets it to the chatId
+     *  (same value space as [attachMessagesListener]'s notificationKey).
+     *  The observer suppresses notifications for whichever chat is active. */
     @Volatile
     var activeChatPartnerUid: String? = null
 
@@ -77,10 +87,16 @@ object ChatNotifications {
                 snap.documents.forEach { doc ->
                     seenChatIds += doc.id
                     if (messageListeners.containsKey(doc.id)) return@forEach
-                    @Suppress("UNCHECKED_CAST")
-                    val participants = (doc.get("participants") as? List<String>).orEmpty()
-                    val partnerUid = participants.firstOrNull { it != uid } ?: return@forEach
-                    attachMessagesListener(appContext, doc.id, partnerUid)
+                    val isGroup = doc.getBoolean("isGroup") == true
+                    if (isGroup) {
+                        val groupName = doc.getString("groupName")?.takeIf { it.isNotBlank() } ?: "Group"
+                        attachMessagesListener(appContext, doc.id, isGroup = true, partnerUid = null, groupName = groupName)
+                    } else {
+                        @Suppress("UNCHECKED_CAST")
+                        val participants = (doc.get("participants") as? List<String>).orEmpty()
+                        val partnerUid = participants.firstOrNull { it != uid } ?: return@forEach
+                        attachMessagesListener(appContext, doc.id, isGroup = false, partnerUid = partnerUid, groupName = null)
+                    }
                 }
                 // Drop listeners for any chat we're no longer part of.
                 val toRemove = messageListeners.keys - seenChatIds
@@ -102,9 +118,12 @@ object ChatNotifications {
     private fun attachMessagesListener(
         appContext: Context,
         chatId: String,
-        partnerUid: String
+        isGroup: Boolean,
+        partnerUid: String?,
+        groupName: String?
     ) {
         val uid = auth.currentUser?.uid ?: return
+        val notificationKey = if (isGroup) chatId else partnerUid ?: return
         val attachedAtMs = System.currentTimeMillis()
         val registration = firestore.collection("chats")
             .document(chatId)
@@ -122,18 +141,20 @@ object ChatNotifications {
                         // Only notify for messages that arrived AFTER both the
                         // process and this listener came up. Without this guard
                         // every fresh launch would re-buzz every message in the
-                        // user's history.
+                        // user's history. System messages (group join/leave/
+                        // rename announcements) never trigger a notification.
                         val tsMs = doc.getDate("timestamp")?.time ?: 0L
                         tsMs > attachedAtMs &&
                             tsMs > processStartMs &&
-                            doc.getString("senderId") != uid
+                            doc.getString("senderId") != uid &&
+                            doc.getString("type") != "system"
                     }
                     .forEach { doc ->
                         // Live-view suppression: if you're already reading this
                         // chat, the message arrives in-line via the chat screen's
                         // listener — no need to also pop a system notification.
-                        if (activeChatPartnerUid == partnerUid) return@forEach
-                        scope.launch { postFor(appContext, doc, partnerUid) }
+                        if (activeChatPartnerUid == notificationKey) return@forEach
+                        scope.launch { postFor(appContext, doc, chatId, isGroup, notificationKey, partnerUid, groupName) }
                     }
             }
         messageListeners[chatId] = registration
@@ -142,14 +163,38 @@ object ChatNotifications {
     private suspend fun postFor(
         appContext: Context,
         doc: DocumentSnapshot,
-        partnerUid: String
+        chatId: String,
+        isGroup: Boolean,
+        notificationKey: String,
+        partnerUid: String?,
+        groupName: String?
     ) {
-        val senderName = resolveDisplayName(partnerUid)
         val preview = previewFor(doc)
-        post(appContext, doc.id, senderName, preview, partnerUid)
+        if (isGroup) {
+            val senderName = resolveDisplayName(doc.getString("senderId").orEmpty())
+            post(
+                appContext = appContext,
+                title = groupName ?: "Group",
+                body = "$senderName: $preview",
+                notificationKey = notificationKey,
+                isGroup = true,
+                chatId = chatId
+            )
+        } else {
+            val senderName = resolveDisplayName(partnerUid.orEmpty())
+            post(
+                appContext = appContext,
+                title = senderName,
+                body = preview,
+                notificationKey = notificationKey,
+                isGroup = false,
+                chatId = chatId
+            )
+        }
     }
 
     private suspend fun resolveDisplayName(uid: String): String {
+        if (uid.isBlank()) return "Someone"
         displayNameCache[uid]?.let { return it }
         val name = runCatching {
             val snap = firestore.collection("users").document(uid).get().await()
@@ -172,10 +217,11 @@ object ChatNotifications {
 
     private fun post(
         appContext: Context,
+        title: String,
+        body: String,
         notificationKey: String,
-        senderName: String,
-        preview: String,
-        chatPartnerUid: String
+        isGroup: Boolean,
+        chatId: String
     ) {
         // Skip silently if the user hasn't granted POST_NOTIFICATIONS. We don't
         // pester them here — MainActivity handles the runtime request.
@@ -187,31 +233,37 @@ object ChatNotifications {
 
         val deepLink = Intent(appContext, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
-            data = Uri.parse("yoloaio://chat/$chatPartnerUid")
+            if (isGroup) {
+                data = Uri.parse("yoloaio://group/$chatId")
+                putExtra(EXTRA_OPEN_GROUP_CHAT_ID, chatId)
+            } else {
+                data = Uri.parse("yoloaio://chat/$notificationKey")
+                putExtra(EXTRA_OPEN_CHAT_PARTNER_UID, notificationKey)
+            }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_CHAT_PARTNER_UID, chatPartnerUid)
         }
         val pendingIntent = PendingIntent.getActivity(
             appContext,
-            chatPartnerUid.hashCode(),
+            notificationKey.hashCode(),
             deepLink,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val notification = NotificationCompat.Builder(appContext, NotificationChannels.CHAT_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(senderName)
-            .setContentText(preview)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(preview))
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
 
-        // Use partner uid as the notification id so successive messages from
-        // the same person replace (not stack) — matches typical messenger UX.
+        // Use the notification key (partner uid for 1:1, chatId for group) as
+        // the notification id so successive messages from the same
+        // conversation replace (not stack) — matches typical messenger UX.
         NotificationManagerCompat.from(appContext)
-            .notify(chatPartnerUid.hashCode(), notification)
+            .notify(notificationKey.hashCode(), notification)
     }
 }

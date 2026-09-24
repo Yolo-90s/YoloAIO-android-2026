@@ -26,8 +26,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBackIos
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.GroupAdd
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -70,14 +72,23 @@ import java.util.Locale
 fun ChatScreen(
     onBack: () -> Unit,
     onUserClick: (String) -> Unit,
+    onOpenGroup: (chatId: String) -> Unit,
+    onCreateGroup: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenMindMatch: (code: String) -> Unit
 ) {
     val repo = remember { ChatRepository() }
+    val groupRepo = remember { GroupChatRepository() }
     val mindMatchRepo = remember { MindMatchRepository() }
     val scope = rememberCoroutineScope()
     val previews by repo.observeChatPreviews().collectAsState(initial = emptyList())
+    val groupPreviews by groupRepo.observeMyGroupChats().collectAsState(initial = emptyList())
+    val pendingInvites by groupRepo.observePendingInvites().collectAsState(initial = emptyList())
     val me by rememberCurrentUser()
+
+    // Covers a crash between accept-invite's two writes (see
+    // GroupChatRepository's doc comment) — cheap, safe on every load.
+    LaunchedEffect(Unit) { groupRepo.reconcileAcceptedInvites() }
 
     // One-tap "create a session + invite this person" shortcut from a
     // contact row. Claiming/answering happens once inside
@@ -98,9 +109,12 @@ fun ChatScreen(
     // No more "browse every registered user" default — that leaked everyone
     // who's ever signed into the app onto the first screen. Default view is
     // just your own conversations (chats you've actually exchanged a
-    // message in); typing in the search bar is now the only way to look up
-    // someone new, searching the full directory by name/email, and tapping
-    // a result opens (or lazily starts) that conversation.
+    // message in, plus any group you've joined); typing in the search bar
+    // is the only way to look up someone new, searching the full directory
+    // by name/email, and tapping a result opens (or lazily starts) that
+    // conversation. Groups aren't part of that directory search — you join
+    // one via an invite, not by finding it — so a query only ever searches
+    // people.
     val conversations by remember(previews) {
         derivedStateOf { previews.filter { it.lastTimeMs > 0L } }
     }
@@ -114,7 +128,14 @@ fun ChatScreen(
             }
         }
     }
-    val displayed = if (hasQuery) searchResults else conversations
+    val mergedItems by remember(conversations, groupPreviews) {
+        derivedStateOf {
+            (conversations.map { ConversationItem.Direct(it) } + groupPreviews.map { ConversationItem.Group(it) })
+                .sortedByDescending { it.lastTimeMs }
+        }
+    }
+    val displayed: List<ConversationItem> =
+        if (hasQuery) searchResults.map { ConversationItem.Direct(it) } else mergedItems
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -133,12 +154,7 @@ fun ChatScreen(
             )
         },
         floatingActionButton = {
-            ComposeFab(onClick = {
-                // Take the user to the top of the list — fast way back
-                // to the search bar if they've scrolled deep into the
-                // conversation history. Doesn't open a "new chat" sheet
-                // because every visible user IS already a chat target.
-            })
+            ComposeFab(onClick = onCreateGroup)
         }
     ) { padding ->
         LazyColumn(
@@ -164,17 +180,40 @@ fun ChatScreen(
                     onClear = { query = "" }
                 )
             }
+            if (!hasQuery && pendingInvites.isNotEmpty()) {
+                item("invites") {
+                    PendingInvitesBanner(
+                        invites = pendingInvites,
+                        onAccept = { invite -> scope.launch { groupRepo.acceptInvite(invite) } },
+                        onDecline = { invite -> scope.launch { groupRepo.declineInvite(invite) } }
+                    )
+                }
+            }
             if (displayed.isEmpty()) {
                 item("empty") {
                     EmptyState(query = query, hasQuery = hasQuery)
                 }
             } else {
-                items(displayed, key = { it.user.uid }) { preview ->
-                    ChatPreviewCard(
-                        preview = preview,
-                        onClick = { onUserClick(preview.user.uid) },
-                        onInviteToMindMatch = { inviteToMindMatch(preview.user.uid) }
-                    )
+                items(
+                    displayed,
+                    key = { item ->
+                        when (item) {
+                            is ConversationItem.Direct -> "d_${item.preview.user.uid}"
+                            is ConversationItem.Group -> "g_${item.preview.chatId}"
+                        }
+                    }
+                ) { item ->
+                    when (item) {
+                        is ConversationItem.Direct -> ChatPreviewCard(
+                            preview = item.preview,
+                            onClick = { onUserClick(item.preview.user.uid) },
+                            onInviteToMindMatch = { inviteToMindMatch(item.preview.user.uid) }
+                        )
+                        is ConversationItem.Group -> GroupPreviewCard(
+                            preview = item.preview,
+                            onClick = { onOpenGroup(item.preview.chatId) }
+                        )
+                    }
                 }
             }
         }
@@ -386,6 +425,64 @@ private fun ChatPreviewCard(
 }
 
 @Composable
+private fun GroupPreviewCard(preview: GroupChatPreview, onClick: () -> Unit) {
+    val hasMessages = preview.lastTimeMs > 0L
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        shadowElevation = 1.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(gradientForUser(preview.chatId))),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Group, contentDescription = null, tint = Color.White)
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        preview.groupName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1
+                    )
+                    if (hasMessages) {
+                        Text(
+                            formatPreviewTime(preview.lastTimeMs),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (hasMessages) preview.lastMessage.ifBlank { "Shared media" }
+                    else "${preview.memberCount} member${if (preview.memberCount == 1) "" else "s"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun AvatarWithStatus(
     user: UserProfile,
     gradient: List<Color>,
@@ -473,7 +570,7 @@ private fun ComposeFab(onClick: () -> Unit) {
             .clip(CircleShape)
             .background(Brush.linearGradient(listOf(primary, tertiary)))
     ) {
-        Icon(Icons.Rounded.EditNote, contentDescription = "Compose")
+        Icon(Icons.Rounded.GroupAdd, contentDescription = "New group")
     }
 }
 

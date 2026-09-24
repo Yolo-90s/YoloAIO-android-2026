@@ -6,13 +6,11 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,29 +18,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBackIos
-import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.EmojiEmotions
-import androidx.compose.material.icons.rounded.Gif
-import androidx.compose.material.icons.rounded.LocationOn
-import androidx.compose.material.icons.rounded.Map
-import androidx.compose.material.icons.rounded.MyLocation
-import androidx.compose.material.icons.rounded.Psychology
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,7 +34,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -76,16 +58,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isShiftPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import com.example.yoloaio.data.FirebaseModule
 import com.example.yoloaio.data.UserProfile
 import com.example.yoloaio.features.weather.LocationProvider
@@ -97,12 +71,6 @@ import kotlinx.coroutines.launch
 private enum class AttachmentMode { None, Emoji, Picker }
 // PickerKind was here — Image and Gif. Image sharing was removed at the
 // user's request; only GIFs remain, so the kind switch is gone too.
-
-private val emojiSet = listOf(
-    "😀", "😂", "🥹", "😍", "😎", "🤔", "🙃", "😴",
-    "👍", "🙏", "👏", "🔥", "🎉", "💯", "❤️", "💜",
-    "🚀", "✨", "⭐", "🌈", "☕", "🍕", "🎵", "📸"
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,7 +115,11 @@ fun ChatConversationScreen(
         return
     }
 
+    val chatId = remember(userId, currentUid) { currentUid?.let { ChatIds.chatIdFor(it, userId) } }
     val messages by repo.observeMessages(userId).collectAsState(initial = emptyList())
+    val chatDoc by repo.observeChatDoc(userId).collectAsState(initial = null)
+    val otherLastRead = chatDoc?.lastRead?.get(userId)?.toDate()?.time ?: 0L
+
     // Declared up here so the call + location permission lambdas can write
     // to it. (They were running into "Unresolved reference 'sendError'"
     // because the original declaration sat below them.)
@@ -263,7 +235,10 @@ fun ChatConversationScreen(
     var uploading by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var actionMessage by remember { mutableStateOf<ChatMessageDoc?>(null) }
+    var replyTo by remember { mutableStateOf<ReplyPreview?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val actionSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val listState = rememberLazyListState()
     val glass = LocalGlass.current
     val headerColor = yoloSurfaceColor(strong = true, isDark = glass.isDark)
@@ -272,6 +247,13 @@ fun ChatConversationScreen(
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
+    }
+
+    // Mark read whenever a new message arrives while this screen is open
+    // (mirrors the notification-suppression DisposableEffect above — being
+    // on this screen at all means you've seen the latest message).
+    LaunchedEffect(chatId, messages.size) {
+        chatId?.let { ChatInteractions.markChatRead(ctx, it) }
     }
 
     // GIF-only picker. (Image-share was removed; we no longer need a
@@ -355,7 +337,7 @@ fun ChatConversationScreen(
                     .padding(horizontal = 12.dp),
                 // 2dp default; the per-bubble spacing is computed below
                 // (within-group = tight, between-group = bigger).
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(2.dp),
                 contentPadding = PaddingValues(vertical = 12.dp)
             ) {
                 var lastDayKey: Int? = null
@@ -398,8 +380,10 @@ fun ChatConversationScreen(
                         MessageBubble(
                             msg = msg,
                             fromMe = msg.senderId == currentUid,
+                            myUid = currentUid,
                             isFirstInGroup = isFirstInGroup,
                             isLastInGroup = isLastInGroup,
+                            seen = msg.senderId == currentUid && msgMs > 0 && otherLastRead >= msgMs,
                             onJoinCall = { room, video ->
                                 JitsiCallLauncher.launch(
                                     ctx, room, video, jitsiServerUrl
@@ -409,7 +393,14 @@ fun ChatConversationScreen(
                             onRefreshLocation = { messageId ->
                                 shareCurrentLocation(refreshMessageId = messageId)
                             },
-                            onOpenLocation = { lat, lon -> openInMaps(ctx, lat, lon) }
+                            onOpenLocation = { lat, lon -> openLocationInMaps(ctx, lat, lon) },
+                            onLongPress = { actionMessage = it },
+                            onToggleReaction = { emoji ->
+                                val mine = msg.reactions[currentUid]
+                                chatId?.let { cid ->
+                                    scope.launch { ChatInteractions.toggleReaction(cid, msg.id, emoji, mine) }
+                                }
+                            }
                         )
                         // Extra breathing room AFTER the last item in a
                         // group separates clusters visually without
@@ -431,6 +422,8 @@ fun ChatConversationScreen(
                 onDraftChange = { draft = it; sendError = null },
                 uploading = uploading,
                 sharingLocation = sharingLocation,
+                replyTo = replyTo,
+                onCancelReply = { replyTo = null },
                 onEmojiClick = { attachmentMode = AttachmentMode.Emoji },
                 onGifClick = {
                     mediaPicker.launch(
@@ -444,12 +437,15 @@ fun ChatConversationScreen(
                     val text = draft.trim()
                     if (text.isEmpty()) return@InputBar
                     val pending = text
+                    val pendingReply = replyTo
                     draft = ""
+                    replyTo = null
                     scope.launch {
-                        val result = repo.sendText(userId, pending)
+                        val result = repo.sendText(userId, pending, pendingReply)
                         result.onFailure {
                             sendError = it.message ?: "Send failed"
                             draft = pending
+                            replyTo = pendingReply
                         }
                     }
                 }
@@ -468,6 +464,38 @@ fun ChatConversationScreen(
                         attachmentMode = AttachmentMode.None
                     }
                 })
+            }
+        }
+
+        actionMessage?.let { target ->
+            ModalBottomSheet(
+                onDismissRequest = { actionMessage = null },
+                sheetState = actionSheetState
+            ) {
+                MessageActionSheetContent(
+                    myCurrentReaction = target.reactions[currentUid],
+                    onReact = { emoji ->
+                        val mine = target.reactions[currentUid]
+                        chatId?.let { cid ->
+                            scope.launch { ChatInteractions.toggleReaction(cid, target.id, emoji, mine) }
+                        }
+                        scope.launch { actionSheetState.hide(); actionMessage = null }
+                    },
+                    onReply = {
+                        replyTo = ReplyPreview(
+                            messageId = target.id,
+                            senderId = target.senderId,
+                            text = target.text?.takeIf { it.isNotBlank() }
+                                ?: when (target.type) {
+                                    ChatMessageDoc.TYPE_IMAGE -> "📷 Photo"
+                                    ChatMessageDoc.TYPE_GIF -> "🎞️ GIF"
+                                    ChatMessageDoc.TYPE_LOCATION -> "📍 Location"
+                                    else -> "Message"
+                                }
+                        )
+                        scope.launch { actionSheetState.hide(); actionMessage = null }
+                    }
+                )
             }
         }
     }
@@ -596,192 +624,6 @@ private fun ConversationTitle(user: UserProfile, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun MessageBubble(
-    msg: ChatMessageDoc,
-    fromMe: Boolean,
-    isFirstInGroup: Boolean,
-    isLastInGroup: Boolean,
-    onJoinCall: (roomName: String, video: Boolean) -> Unit,
-    onJoinMindMatch: (code: String) -> Unit,
-    onRefreshLocation: (messageId: String) -> Unit,
-    onOpenLocation: (lat: Double, lon: Double) -> Unit
-) {
-    val alignment = if (fromMe) Alignment.End else Alignment.Start
-    val timeString = msg.timestamp?.toDate()?.let {
-        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(it)
-    } ?: ""
-
-    // Asymmetric corner radii flip based on position-in-group. The
-    // "tail" corner (4dp) only appears on the FIRST bubble of a group,
-    // so consecutive bubbles share rounded edges instead of repeating
-    // the tail and looking visually jagged.
-    val r = 18.dp
-    val tail = 4.dp
-    val shape = when {
-        fromMe -> RoundedCornerShape(
-            topStart = r,
-            topEnd = if (isFirstInGroup) tail else r,
-            bottomEnd = if (isLastInGroup) r else tail,
-            bottomStart = r
-        )
-        else -> RoundedCornerShape(
-            topStart = if (isFirstInGroup) tail else r,
-            topEnd = r,
-            bottomEnd = r,
-            bottomStart = if (isLastInGroup) r else tail
-        )
-    }
-
-    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
-        when (msg.type) {
-            ChatMessageDoc.TYPE_TEXT -> TextBubble(
-                text = msg.text.orEmpty(), fromMe = fromMe, shape = shape
-            )
-            ChatMessageDoc.TYPE_IMAGE -> MediaBubble(msg.mediaUrl, "PHOTO", fromMe)
-            ChatMessageDoc.TYPE_GIF -> MediaBubble(msg.mediaUrl, "GIF", fromMe)
-            ChatMessageDoc.TYPE_CALL -> CallInviteBubble(
-                video = msg.callVideo,
-                fromMe = fromMe,
-                shape = shape,
-                onJoin = {
-                    msg.callRoom?.takeIf { it.isNotBlank() }
-                        ?.let { onJoinCall(it, msg.callVideo) }
-                }
-            )
-            ChatMessageDoc.TYPE_MINDMATCH -> MindMatchInviteBubble(
-                fromMe = fromMe,
-                shape = shape,
-                onJoin = {
-                    msg.mindMatchCode?.takeIf { it.isNotBlank() }
-                        ?.let { onJoinMindMatch(it) }
-                }
-            )
-            ChatMessageDoc.TYPE_LOCATION -> LocationBubble(
-                msg = msg,
-                fromMe = fromMe,
-                shape = shape,
-                onRefresh = { onRefreshLocation(msg.id) },
-                onOpen = { onOpenLocation(msg.locLat, msg.locLon) }
-            )
-            else -> TextBubble(msg.text.orEmpty(), fromMe, shape)
-        }
-        // Timestamp only on the LAST bubble of a group — middle bubbles
-        // get a clean look without per-message clutter.
-        if (isLastInGroup) {
-            Text(
-                timeString,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun LocationBubble(
-    msg: ChatMessageDoc,
-    fromMe: Boolean,
-    shape: RoundedCornerShape,
-    onRefresh: () -> Unit,
-    onOpen: () -> Unit
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val fg = if (fromMe) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurface
-    val bgModifier = if (fromMe) {
-        Modifier.background(Brush.linearGradient(listOf(primary, tertiary)))
-    } else {
-        Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
-    }
-    val updatedLabel = msg.locUpdatedAt
-        .takeIf { it > 0L }
-        ?.let { relativeAgo(it) }
-        ?: "just now"
-
-    Column(
-        modifier = Modifier
-            .widthIn(max = 260.dp)
-            .clip(shape)
-            .then(bgModifier)
-            .clickable(onClick = onOpen)
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Rounded.LocationOn,
-                contentDescription = null,
-                tint = fg,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    if (fromMe) "My location" else "Shared location",
-                    color = fg,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    "%.5f, %.5f".format(msg.locLat, msg.locLon),
-                    color = fg.copy(alpha = 0.85f),
-                    style = MaterialTheme.typography.labelSmall
-                )
-                Text(
-                    "Updated $updatedLabel",
-                    color = fg.copy(alpha = 0.7f),
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Sender-only: refresh updates the same doc with the current
-            // coords. Recipient can't push the sender's location for them.
-            if (fromMe) {
-                TextButton(onClick = onRefresh) {
-                    Icon(
-                        Icons.Rounded.Refresh,
-                        contentDescription = null,
-                        tint = fg,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("Refresh", color = fg, style = MaterialTheme.typography.labelMedium)
-                }
-            }
-            TextButton(onClick = onOpen) {
-                Icon(
-                    Icons.Rounded.Map,
-                    contentDescription = null,
-                    tint = fg,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("Open in Maps", color = fg, style = MaterialTheme.typography.labelMedium)
-            }
-        }
-    }
-}
-
-/** "12 sec ago", "5 min ago", "2 hr ago", or absolute time for older. */
-private fun relativeAgo(epochMs: Long): String {
-    val deltaSec = ((System.currentTimeMillis() - epochMs) / 1000L).coerceAtLeast(0L)
-    return when {
-        deltaSec < 10 -> "just now"
-        deltaSec < 60 -> "$deltaSec sec ago"
-        deltaSec < 3600 -> "${deltaSec / 60} min ago"
-        deltaSec < 86_400 -> "${deltaSec / 3600} hr ago"
-        else -> java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
-            .format(java.util.Date(epochMs))
-    }
-}
-
 internal sealed interface LocationAction {
     data object Send : LocationAction
     data class Refresh(val messageId: String) : LocationAction
@@ -820,95 +662,6 @@ internal suspend fun runLocationAction(
     result.onFailure { onError(it.message ?: "Couldn't share location") }
 }
 
-@Composable
-private fun CallInviteBubble(
-    video: Boolean,
-    fromMe: Boolean,
-    shape: RoundedCornerShape,
-    onJoin: () -> Unit
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val fg = if (fromMe) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurface
-    val bgModifier = if (fromMe) {
-        Modifier.background(Brush.linearGradient(listOf(primary, tertiary)))
-    } else {
-        Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
-    }
-    val label = if (video) "Video call" else "Voice call"
-    val icon = if (video) Icons.Rounded.Videocam else Icons.Rounded.Call
-
-    Row(
-        modifier = Modifier
-            .widthIn(max = 260.dp)
-            .clip(shape)
-            .then(bgModifier)
-            .clickable(onClick = onJoin)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(
-                label,
-                color = fg,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "Tap to join",
-                color = fg.copy(alpha = 0.85f),
-                style = MaterialTheme.typography.labelSmall
-            )
-        }
-    }
-}
-
-@Composable
-private fun MindMatchInviteBubble(
-    fromMe: Boolean,
-    shape: RoundedCornerShape,
-    onJoin: () -> Unit
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val fg = if (fromMe) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurface
-    val bgModifier = if (fromMe) {
-        Modifier.background(Brush.linearGradient(listOf(primary, tertiary)))
-    } else {
-        Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
-    }
-
-    Row(
-        modifier = Modifier
-            .widthIn(max = 260.dp)
-            .clip(shape)
-            .then(bgModifier)
-            .clickable(onClick = onJoin)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(Icons.Rounded.Psychology, contentDescription = null, tint = fg, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(
-                "MindMatch invite",
-                color = fg,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                "Tap to play",
-                color = fg.copy(alpha = 0.85f),
-                style = MaterialTheme.typography.labelSmall
-            )
-        }
-    }
-}
-
 /**
  * Sends the call-invite chat message + launches the Jitsi native activity.
  * Called from the composable's `beginCall` after permissions are granted.
@@ -932,324 +685,5 @@ private fun startCall(
         // the write fails we still proceed with the call; the caller
         // already navigated.
         repo.sendCallInvite(otherUid, room, video)
-    }
-}
-
-// ───────────────────────── date separators ─────────────────────────
-
-@Composable
-private fun DateSeparator(epochMs: Long) {
-    // Hairline rule on each side of the day label — much more elegant
-    // than a chip. Subtle, doesn't compete with bubbles.
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-        )
-        Text(
-            text = formatDayLabel(epochMs),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 14.dp)
-        )
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-        )
-    }
-}
-
-/** Day bucket key (year * 1000 + day-of-year) — used to detect day flips. */
-private fun dayKeyOf(epochMs: Long): Int {
-    val cal = java.util.Calendar.getInstance().apply { timeInMillis = epochMs }
-    return cal.get(java.util.Calendar.YEAR) * 1000 +
-        cal.get(java.util.Calendar.DAY_OF_YEAR)
-}
-
-private fun formatDayLabel(epochMs: Long): String {
-    val now = java.util.Calendar.getInstance()
-    val then = java.util.Calendar.getInstance().apply { timeInMillis = epochMs }
-    val sameYear = now.get(java.util.Calendar.YEAR) == then.get(java.util.Calendar.YEAR)
-    val dayDelta = dayKeyOf(now.timeInMillis) - dayKeyOf(epochMs)
-    return when {
-        dayDelta == 0 -> "Today"
-        dayDelta == 1 -> "Yesterday"
-        sameYear -> java.text.SimpleDateFormat("EEEE, MMM d", java.util.Locale.getDefault())
-            .format(java.util.Date(epochMs))
-        else -> java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
-            .format(java.util.Date(epochMs))
-    }
-}
-
-/** Fires a `geo:` intent — opens any installed maps app at the given pin. */
-private fun openInMaps(context: android.content.Context, lat: Double, lon: Double) {
-    val uri = android.net.Uri.parse("geo:$lat,$lon?q=$lat,$lon(Shared%20location)")
-    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri).apply {
-        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    runCatching { context.startActivity(intent) }
-}
-
-@Composable
-private fun TextBubble(text: String, fromMe: Boolean, shape: RoundedCornerShape) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    // Own messages: linear gradient from primary → tertiary. Reads
-    // "neon" / modern messenger. Incoming: translucent glass on the
-    // surfaceVariant so the global app backdrop bleeds through subtly.
-    val textColor = if (fromMe) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurface
-    val bgModifier = if (fromMe) {
-        Modifier.background(Brush.linearGradient(listOf(primary, tertiary)))
-    } else {
-        Modifier
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
-    }
-
-    Box(
-        modifier = Modifier
-            .widthIn(max = 260.dp)
-            .clip(shape)
-            .then(bgModifier)
-            .padding(horizontal = 14.dp, vertical = 10.dp)
-    ) {
-        Text(
-            text,
-            color = textColor,
-            style = MaterialTheme.typography.bodyMedium,
-            lineHeight = MaterialTheme.typography.bodyMedium.fontSize * 1.35f
-        )
-    }
-}
-
-@Composable
-private fun MediaBubble(url: String?, tag: String, fromMe: Boolean) {
-    val shape =
-        if (fromMe) RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)
-        else RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp)
-    Box(
-        modifier = Modifier
-            .widthIn(max = 240.dp)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        AsyncImage(
-            model = url,
-            contentDescription = tag,
-            modifier = Modifier
-                .widthIn(max = 240.dp)
-                .clip(shape)
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(8.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color.Black.copy(alpha = 0.45f))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
-        ) {
-            Text(tag, color = Color.White, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
-@Composable
-private fun InputBar(
-    draft: String,
-    onDraftChange: (String) -> Unit,
-    uploading: Boolean,
-    sharingLocation: Boolean,
-    onEmojiClick: () -> Unit,
-    onGifClick: () -> Unit,
-    onLocationClick: () -> Unit,
-    onSend: () -> Unit
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val canSend = draft.isNotBlank()
-
-    Column {
-        if (uploading || sharingLocation) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    if (sharingLocation) "Getting location…" else "Uploading…",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        // Pill-shaped glass row holding all attachment affordances + the
-        // text field. Send button sits outside as a circular gradient
-        // FAB so the eye reads the pill+button pair as one composition.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onEmojiClick, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        Icons.Rounded.EmojiEmotions,
-                        contentDescription = "Emoji",
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                IconButton(onClick = onGifClick, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        Icons.Rounded.Gif,
-                        contentDescription = "GIF",
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                IconButton(
-                    onClick = onLocationClick,
-                    enabled = !sharingLocation,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.MyLocation,
-                        contentDescription = "Share location",
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                androidx.compose.foundation.text.BasicTextField(
-                    value = draft,
-                    onValueChange = onDraftChange,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 4.dp, vertical = 12.dp)
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown &&
-                                event.key == Key.Enter &&
-                                !event.isShiftPressed
-                            ) {
-                                onSend()
-                                true
-                            } else false
-                        },
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
-                    cursorBrush = Brush.linearGradient(listOf(primary, tertiary)),
-                    maxLines = 4,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { onSend() }),
-                    decorationBox = { inner ->
-                        if (draft.isEmpty()) {
-                            Text(
-                                "Message",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    .copy(alpha = 0.65f)
-                            )
-                        }
-                        inner()
-                    }
-                )
-            }
-
-            // Gradient circular send FAB. Disabled state fades to the
-            // surface tone so it visually retreats until you type.
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (canSend) Brush.linearGradient(listOf(primary, tertiary))
-                        else Brush.linearGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                            )
-                        )
-                    )
-                    .clickable(enabled = canSend, onClick = onSend),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.Send,
-                    contentDescription = "Send",
-                    tint = if (canSend) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmojiPicker(onPick: (String) -> Unit) {
-    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        Text("Emoji", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(8),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.height(220.dp)
-        ) {
-            itemsIndexed(emojiSet) { _, emoji ->
-                Box(
-                    modifier = Modifier
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onPick(emoji) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(emoji, style = MaterialTheme.typography.titleLarge)
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun LoadingShell(title: String, onBack: () -> Unit) {
-    Scaffold(
-        containerColor = Color.Transparent,
-        topBar = {
-            TopAppBar(
-                title = { Text(title) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBackIos, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-            )
-        }
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
     }
 }

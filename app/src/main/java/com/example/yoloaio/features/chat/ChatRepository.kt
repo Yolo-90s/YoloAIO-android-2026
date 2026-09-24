@@ -84,6 +84,26 @@ class ChatRepository {
             )
         }
 
+    /** The raw chat doc (participants/lastMessage/lastRead) — used for read-receipt ticks. */
+    fun observeChatDoc(otherUid: String): Flow<ChatDoc?> = callbackFlow {
+        val me = currentUid
+        if (me == null) {
+            trySend(null)
+            close()
+            return@callbackFlow
+        }
+        val chatId = ChatIds.chatIdFor(me, otherUid)
+        val registration = firestore.collection("chats").document(chatId)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    trySend(null)
+                    return@addSnapshotListener
+                }
+                trySend(snap?.takeIf { it.exists() }?.let { safeDocToObject<ChatDoc>(it) })
+            }
+        awaitClose { registration.remove() }
+    }
+
     fun observeMessages(otherUid: String): Flow<List<ChatMessageDoc>> = callbackFlow {
         val me = currentUid
         if (me == null) {
@@ -108,7 +128,7 @@ class ChatRepository {
         awaitClose { registration.remove() }
     }
 
-    suspend fun sendText(otherUid: String, text: String): Result<Unit> = runCatching {
+    suspend fun sendText(otherUid: String, text: String, replyTo: ReplyPreview? = null): Result<Unit> = runCatching {
         val me = currentUid ?: error("Not signed in")
         val trimmed = text.trim()
         require(trimmed.isNotEmpty()) { "Message is empty" }
@@ -130,6 +150,9 @@ class ChatRepository {
                 "senderId" to me,
                 "type" to ChatMessageDoc.TYPE_TEXT,
                 "text" to trimmed,
+                "replyToId" to replyTo?.messageId,
+                "replyToSenderId" to replyTo?.senderId,
+                "replyToText" to replyTo?.text,
                 "timestamp" to FieldValue.serverTimestamp()
             )
         ).await()

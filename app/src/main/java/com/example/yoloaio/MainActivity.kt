@@ -38,6 +38,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private var deepLinkChatPartnerUid by mutableStateOf<String?>(null)
+    private var deepLinkGroupChatId by mutableStateOf<String?>(null)
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -76,6 +77,7 @@ class MainActivity : ComponentActivity() {
         }
 
         deepLinkChatPartnerUid = readChatDeepLink(intent)
+        deepLinkGroupChatId = readGroupChatDeepLink(intent)
 
         setContent {
             val config by rememberAppConfig()
@@ -91,7 +93,9 @@ class MainActivity : ComponentActivity() {
                     AppBackground {
                         AppNavGraph(
                             deepLinkChatPartnerUid = deepLinkChatPartnerUid,
-                            onDeepLinkConsumed = { deepLinkChatPartnerUid = null }
+                            onDeepLinkConsumed = { deepLinkChatPartnerUid = null },
+                            deepLinkGroupChatId = deepLinkGroupChatId,
+                            onGroupDeepLinkConsumed = { deepLinkGroupChatId = null }
                         )
                     }
                     if (!splashDone) {
@@ -116,6 +120,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         readChatDeepLink(intent)?.let { deepLinkChatPartnerUid = it }
+        readGroupChatDeepLink(intent)?.let { deepLinkGroupChatId = it }
     }
 
     override fun onDestroy() {
@@ -126,6 +131,12 @@ class MainActivity : ComponentActivity() {
     private fun readChatDeepLink(intent: Intent?): String? {
         if (intent == null) return null
         return intent.getStringExtra(ChatNotifications.EXTRA_OPEN_CHAT_PARTNER_UID)
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun readGroupChatDeepLink(intent: Intent?): String? {
+        if (intent == null) return null
+        return intent.getStringExtra(ChatNotifications.EXTRA_OPEN_GROUP_CHAT_ID)
             ?.takeIf { it.isNotBlank() }
     }
 

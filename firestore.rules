@@ -82,11 +82,66 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // ── YoloAIO: chat (1:1 DMs, gated on participants array) ─────────
+    // ── YoloAIO: chat (1:1 DMs + groups, gated on participants array) ─
+    // 1:1 chats are unchanged in shape (chatId = 2-sorted-uid join,
+    // isGroup absent). Group chats add isGroup/groupName/groupPhotoUrl/
+    // ownerUid/adminUids — adminUids (not ownerUid) is what actually
+    // gates admin-only writes. lastRead is a per-participant read cursor
+    // used for read-receipt ticks, shared by both chat kinds.
     match /chats/{chatId} {
       allow read:   if isSignedIn() && request.auth.uid in resource.data.participants;
       allow create: if isSignedIn() && request.auth.uid in request.resource.data.participants;
-      allow update: if isSignedIn() && request.auth.uid in resource.data.participants;
+      // "Delete chat" (1:1 only) previously had no delete rule at all, so
+      // it silently failed at the final chatRef.delete() step — fixed
+      // here since we're already touching this exact block. Deliberately
+      // excludes groups (members leave via clause 4 below instead of a
+      // client being able to delete a whole group).
+      allow delete: if isSignedIn() && request.auth.uid in resource.data.participants
+                     && resource.data.get('isGroup', false) == false;
+
+      allow update: if isSignedIn() && (
+        // (1) Any current participant bumps preview/read-cursor fields —
+        // covers sending a message (1:1 or group) and marking read.
+        // lastRead is restricted to the caller's own key via a nested diff.
+        (
+          request.auth.uid in resource.data.participants &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage','lastTime','lastRead']) &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastRead']) ||
+            request.resource.data.lastRead.diff(resource.data.get('lastRead', {})).affectedKeys().hasOnly([request.auth.uid])
+          )
+        ) ||
+        // (2) Admin renames / re-photos / edits the admin roster — never
+        // touches participants here. New admins must already be confirmed
+        // participants (blocks promoting an outsider into a write-capable role).
+        (
+          request.auth.uid in resource.data.get('adminUids', []) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['groupName','groupPhotoUrl','adminUids']) &&
+          request.resource.data.get('adminUids', []).hasOnly(resource.data.participants)
+        ) ||
+        // (3) Admin removes member(s) — participants may only SHRINK (every
+        // new uid already existed). Blocks using this as a back door to add
+        // someone without an accepted invite.
+        (
+          request.auth.uid in resource.data.get('adminUids', []) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants']) &&
+          resource.data.participants.hasAll(request.resource.data.participants) &&
+          request.resource.data.participants.size() < resource.data.participants.size()
+        ) ||
+        // (4) Any current participant removes ONLY themselves (leave).
+        (
+          request.auth.uid in resource.data.participants &&
+          !(request.auth.uid in request.resource.data.participants) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])
+        ) ||
+        // (5) A non-participant adds ONLY themselves, only with an accepted invite.
+        (
+          !(request.auth.uid in resource.data.participants) &&
+          request.auth.uid in request.resource.data.participants &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants']) &&
+          get(/databases/$(database)/documents/groupInvites/$(chatId + '_' + request.auth.uid)).data.status == 'accepted'
+        )
+      );
 
       match /messages/{messageId} {
         allow read: if isSignedIn()
@@ -94,8 +149,40 @@ service cloud.firestore {
         allow create: if isSignedIn()
                        && request.auth.uid == request.resource.data.senderId
                        && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
-        allow update, delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+        // Sender may edit/delete their own message as before. ANY current
+        // participant may additionally react — restricted to touching only
+        // the reactions field, and only their own key within it.
+        allow update: if isSignedIn() && (
+          resource.data.senderId == request.auth.uid ||
+          (
+            request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) &&
+            request.resource.data.reactions.diff(resource.data.get('reactions', {})).affectedKeys().hasOnly([request.auth.uid])
+          )
+        );
+        allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
       }
+    }
+
+    // ── YoloAIO: group chat invite/accept/decline handshake ───────────
+    // Deterministic id (chatId_invitedUid) so this rule and the chats/
+    // {chatId} update rule's clause (5) can each reference one specific
+    // invite doc by constructing its path, with no Cloud Function.
+    match /groupInvites/{inviteId} {
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.invitedUid || request.auth.uid == resource.data.invitedByUid);
+      allow create: if isSignedIn()
+        && request.auth.uid == request.resource.data.invitedByUid
+        && request.resource.data.status == 'pending'
+        && inviteId == request.resource.data.chatId + '_' + request.resource.data.invitedUid
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(request.resource.data.chatId)).data.get('adminUids', []);
+      allow update: if isSignedIn() && request.auth.uid == resource.data.invitedUid
+        && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','respondedAt'])
+        && request.resource.data.status in ['accepted','declined'];
+      // Inviter cancels a pending invite, or clears a declined one to
+      // re-invite later (re-invite = delete-then-create, since create
+      // fails on an already-existing doc id). Deliberately blocked once accepted.
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.invitedByUid && resource.data.status != 'accepted';
     }
 
     // ── YoloAIO: public quote wall ───────────────────────────────────

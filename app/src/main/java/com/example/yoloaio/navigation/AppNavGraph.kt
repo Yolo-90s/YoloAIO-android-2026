@@ -13,6 +13,9 @@ import com.example.yoloaio.features.audio.AudioTrimmerScreen
 import com.example.yoloaio.features.auth.AuthScreen
 import com.example.yoloaio.features.chat.ChatConversationScreen
 import com.example.yoloaio.features.chat.ChatScreen
+import com.example.yoloaio.features.chat.CreateGroupScreen
+import com.example.yoloaio.features.chat.GroupChatScreen
+import com.example.yoloaio.features.chat.GroupInfoScreen
 import com.example.yoloaio.features.chat.UserProfileScreen
 import com.example.yoloaio.features.community.CommunityChannelScreen
 import com.example.yoloaio.features.videos.VideoPlayerScreen
@@ -48,7 +51,9 @@ import com.example.yoloaio.features.wifi.WifiLabScreen
 @Composable
 fun AppNavGraph(
     deepLinkChatPartnerUid: String? = null,
-    onDeepLinkConsumed: () -> Unit = {}
+    onDeepLinkConsumed: () -> Unit = {},
+    deepLinkGroupChatId: String? = null,
+    onGroupDeepLinkConsumed: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     val startDestination = remember {
@@ -66,6 +71,17 @@ fun AppNavGraph(
             }
         }
         onDeepLinkConsumed()
+    }
+
+    // Same idea, group-chat notification tap.
+    LaunchedEffect(deepLinkGroupChatId) {
+        val chatId = deepLinkGroupChatId ?: return@LaunchedEffect
+        if (UserSession.isSignedIn) {
+            navController.navigate(Routes.groupChat(chatId)) {
+                launchSingleTop = true
+            }
+        }
+        onGroupDeepLinkConsumed()
     }
 
     NavHost(navController = navController, startDestination = startDestination) {
@@ -107,6 +123,8 @@ fun AppNavGraph(
                 onUserClick = { userId ->
                     navController.navigate(Routes.chatConversation(userId))
                 },
+                onOpenGroup = { chatId -> navController.navigate(Routes.groupChat(chatId)) },
+                onCreateGroup = { navController.navigate(Routes.CREATE_GROUP) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenMindMatch = { code -> navController.navigate(Routes.mindMatchSession(code)) }
             )
@@ -121,6 +139,42 @@ fun AppNavGraph(
                 onBack = { navController.popBackStack() },
                 onOpenProfile = { uid -> navController.navigate(Routes.userProfile(uid)) },
                 onOpenMindMatch = { code -> navController.navigate(Routes.mindMatchSession(code)) }
+            )
+        }
+        composable(Routes.CREATE_GROUP) {
+            CreateGroupScreen(
+                onBack = { navController.popBackStack() },
+                onCreated = { chatId ->
+                    navController.navigate(Routes.groupChat(chatId)) {
+                        popUpTo(Routes.CHAT) { inclusive = false }
+                    }
+                }
+            )
+        }
+        composable(
+            route = Routes.GROUP_CHAT,
+            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString("chatId").orEmpty()
+            GroupChatScreen(
+                chatId = chatId,
+                onBack = { navController.popBackStack() },
+                onOpenInfo = { id -> navController.navigate(Routes.groupInfo(id)) }
+            )
+        }
+        composable(
+            route = Routes.GROUP_INFO,
+            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString("chatId").orEmpty()
+            GroupInfoScreen(
+                chatId = chatId,
+                onBack = { navController.popBackStack() },
+                onLeft = {
+                    navController.navigate(Routes.CHAT) {
+                        popUpTo(Routes.CHAT) { inclusive = true }
+                    }
+                }
             )
         }
         composable(
