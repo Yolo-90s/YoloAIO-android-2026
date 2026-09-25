@@ -89,7 +89,16 @@ service cloud.firestore {
     // gates admin-only writes. lastRead is a per-participant read cursor
     // used for read-receipt ticks, shared by both chat kinds.
     match /chats/{chatId} {
-      allow read:   if isSignedIn() && request.auth.uid in resource.data.participants;
+      // `resource == null ||` guards a genuine Firestore rules gotcha: a
+      // get() on a document that doesn't exist yet still evaluates this
+      // rule, with `resource` null — dereferencing `resource.data` on a
+      // null resource throws a rules evaluation error, which Firestore
+      // treats as permission-denied, not "not found". Without this guard,
+      // observeChatDoc()'s existence-check for a brand-new (never-
+      // messaged) 1:1 conversation throws "Missing or insufficient
+      // permissions" instead of just returning "doesn't exist". Safe to
+      // allow broadly: a nonexistent doc has no data to leak.
+      allow read:   if isSignedIn() && (resource == null || request.auth.uid in resource.data.participants);
       allow create: if isSignedIn() && request.auth.uid in request.resource.data.participants;
       // "Delete chat" (1:1 only) previously had no delete rule at all, so
       // it silently failed at the final chatRef.delete() step — fixed
@@ -169,7 +178,15 @@ service cloud.firestore {
     // {chatId} update rule's clause (5) can each reference one specific
     // invite doc by constructing its path, with no Cloud Function.
     match /groupInvites/{inviteId} {
-      allow read: if isSignedIn() && (request.auth.uid == resource.data.invitedUid || request.auth.uid == resource.data.invitedByUid);
+      // Same `resource == null ||` guard as chats/{chatId} above — without
+      // it, GroupChatRepository.inviteMembers()'s existence-check (getDoc,
+      // to decide create-vs-delete-then-recreate) throws "Missing or
+      // insufficient permissions" for every brand-new invitee, since their
+      // invite doc has never existed yet. This was the actual bug behind
+      // the "invite modal won't close" / "no pending status shown" report
+      // — inviteMembers() threw on the very first uid in the loop, before
+      // ever reaching the create() call.
+      allow read: if isSignedIn() && (resource == null || request.auth.uid == resource.data.invitedUid || request.auth.uid == resource.data.invitedByUid);
       allow create: if isSignedIn()
         && request.auth.uid == request.resource.data.invitedByUid
         && request.resource.data.status == 'pending'

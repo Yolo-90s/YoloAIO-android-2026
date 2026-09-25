@@ -267,12 +267,8 @@ fun GroupInfoScreen(chatId: String, onBack: () -> Unit, onLeft: () -> Unit) {
         ModalBottomSheet(onDismissRequest = { showAddMembers = false }, sheetState = sheetState) {
             AddMembersSheetContent(
                 excludeUids = g.participants.toSet() + myInvites.map { it.invitedUid }.toSet(),
-                onAdd = { uids ->
-                    scope.launch {
-                        repo.inviteMembers(chatId, g.groupName, uids)
-                        showAddMembers = false
-                    }
-                }
+                onAdd = { uids -> repo.inviteMembers(chatId, g.groupName, uids) },
+                onDone = { showAddMembers = false }
             )
         }
     }
@@ -326,11 +322,35 @@ private fun PendingMemberRow(name: String, onCancel: () -> Unit) {
 }
 
 @Composable
-private fun AddMembersSheetContent(excludeUids: Set<String>, onAdd: (List<String>) -> Unit) {
+private fun AddMembersSheetContent(
+    excludeUids: Set<String>,
+    onAdd: suspend (List<String>) -> Result<Unit>,
+    onDone: () -> Unit
+) {
     val repo = remember { ChatRepository() }
     val users by repo.observeOtherUsers().collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf(setOf<String>()) }
+    var inviting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun handleInvite() {
+        if (inviting || selected.isEmpty()) return
+        inviting = true
+        error = null
+        scope.launch {
+            onAdd(selected.toList())
+                .onSuccess { onDone() }
+                // Without this, a failed invite left the sheet with no
+                // feedback — the actual bug behind the "invite doesn't
+                // seem to do anything" report (a rules gotcha that's
+                // since been fixed, but this stays as a safety net for
+                // any future failure too).
+                .onFailure { error = it.message ?: "Couldn't send invites" }
+            inviting = false
+        }
+    }
 
     val filtered = remember(users, query, excludeUids) {
         val q = query.trim().lowercase()
@@ -361,11 +381,22 @@ private fun AddMembersSheetContent(excludeUids: Set<String>, onAdd: (List<String
                 }
             }
         }
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
         Spacer(Modifier.height(8.dp))
         Button(
-            onClick = { onAdd(selected.toList()) },
-            enabled = selected.isNotEmpty(),
+            onClick = ::handleInvite,
+            enabled = selected.isNotEmpty() && !inviting,
             modifier = Modifier.fillMaxWidth()
-        ) { Text(if (selected.isEmpty()) "Select people to invite" else "Invite ${selected.size}") }
+        ) {
+            Text(
+                when {
+                    inviting -> "Inviting…"
+                    selected.isEmpty() -> "Select people to invite"
+                    else -> "Invite ${selected.size}"
+                }
+            )
+        }
     }
 }
