@@ -15,6 +15,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "248053372754-1uk625crb9lfm0hilvkom4e68usbf0p5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.apartment_manager",
+            "certificate_hash": "a537728e49bb146b121017aa92b1121f07cf6369"
+          }
+        },
+        {
           "client_id": "248053372754-qtmfvl5mr0gjpn57rbvg098u4dbj5kqg.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
