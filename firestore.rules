@@ -33,6 +33,18 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    // Developer is the only role allowed to add/edit flat directory details (owner/tenant/
+    // staff records) — Admin can see everything but not change flat records.
+    function isDeveloper() {
+      return isSignedIn() && (
+        request.auth.token.admin == true ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'developer'
+        )
+      );
+    }
+
     // ── Shared: user profile (used by BOTH apps) ─────────────────────
     // Outer read/write semantics match Yolo-Home's existing rule exactly.
     // YoloAIO's per-user subcollections live inside.
@@ -59,12 +71,12 @@ service cloud.firestore {
 
     match /masterFlats/{flatId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isDeveloper();
     }
 
     match /flats/{flatId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isDeveloper();
     }
 
     match /maintenanceSettings/{doc} {
@@ -80,6 +92,13 @@ service cloud.firestore {
     match /readings/{id} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
+    }
+
+    // ── Yolo-Home: Community Board (news/events/notices) ──────────────
+    // Any resident/admin can read; only admins can post/edit/remove.
+    match /posts/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
     }
 
     // ── YoloAIO: chat (1:1 DMs + groups, gated on participants array) ─
