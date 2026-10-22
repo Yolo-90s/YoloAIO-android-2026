@@ -212,9 +212,10 @@ private fun DetailContent(
             }
         }
 
-        // Single action — Vidking's `?progress=` seek path is unreliable on
-        // this device's HLS stack, so every tap starts the movie cleanly
-        // from 0. Position is still recorded server-side for future use.
+        // Single action — the embed player's seek-on-load param has been
+        // unreliable on this device's HLS stack, so every tap starts the
+        // movie cleanly from 0. Position is still recorded server-side
+        // for future use.
         Button(
             onClick = { onPlay(movie.idAsString) },
             modifier = Modifier.fillMaxWidth().height(52.dp),

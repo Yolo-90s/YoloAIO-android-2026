@@ -3,8 +3,25 @@ package com.example.yoloaio.features.movies
 import android.webkit.JavascriptInterface
 import org.json.JSONObject
 
-object VidkingPlayer {
-    private const val BASE = "https://www.vidking.net/embed"
+/**
+ * Builds embed URLs for vidlink.pro — a free, TMDB-id-based movie/TV embed,
+ * same category of service as the vidking.net embed this replaced. Switched
+ * because vidking.net's DNS delegation broke (its nameservers stopped
+ * answering entirely, confirmed independent of any local network), not a
+ * code bug on our end.
+ *
+ * Query params below are vidlink.pro's own documented ones (confirmed
+ * against vidlink.pro directly), not carried over from Vidking's — the two
+ * services don't share a param vocabulary. `episodeSelector` is kept as a
+ * no-op parameter so [TvPlayerScreen] doesn't need to change its call site;
+ * vidlink.pro has no equivalent toggle (its player always shows one).
+ *
+ * Progress tracking does NOT depend on this provider's own postMessage
+ * format — see PlayerWebView.kt's injected JS hook, which attaches directly
+ * to the page's real <video> element regardless of which embed is loaded.
+ */
+object MovieEmbedPlayer {
+    private const val BASE = "https://vidlink.pro"
 
     fun movieEmbedUrl(
         tmdbId: String,
@@ -13,12 +30,12 @@ object VidkingPlayer {
         progressSeconds: Int? = null
     ): String {
         val params = buildList {
-            add("color=$primaryColorHex")
-            if (autoPlay) add("autoPlay=true")
-            if (progressSeconds != null && progressSeconds > 0) add("progress=$progressSeconds")
+            add("primaryColor=$primaryColorHex")
+            add("autoplay=$autoPlay")
+            add("title=false")
+            if (progressSeconds != null && progressSeconds > 0) add("startAt=$progressSeconds")
         }
-        val query = if (params.isEmpty()) "" else "?${params.joinToString("&")}"
-        return "$BASE/movie/$tmdbId$query"
+        return "$BASE/movie/$tmdbId?${params.joinToString("&")}"
     }
 
     fun tvEmbedUrl(
@@ -28,18 +45,17 @@ object VidkingPlayer {
         primaryColorHex: String = "B85AC1",
         autoPlay: Boolean = true,
         nextEpisode: Boolean = true,
-        episodeSelector: Boolean = true,
+        @Suppress("UNUSED_PARAMETER") episodeSelector: Boolean = true,
         progressSeconds: Int? = null
     ): String {
         val params = buildList {
-            add("color=$primaryColorHex")
-            if (autoPlay) add("autoPlay=true")
-            if (nextEpisode) add("nextEpisode=true")
-            if (episodeSelector) add("episodeSelector=true")
-            if (progressSeconds != null && progressSeconds > 0) add("progress=$progressSeconds")
+            add("primaryColor=$primaryColorHex")
+            add("autoplay=$autoPlay")
+            add("title=false")
+            if (nextEpisode) add("nextbutton=true")
+            if (progressSeconds != null && progressSeconds > 0) add("startAt=$progressSeconds")
         }
-        val query = if (params.isEmpty()) "" else "?${params.joinToString("&")}"
-        return "$BASE/tv/$tmdbId/$season/$episode$query"
+        return "$BASE/tv/$tmdbId/$season/$episode?${params.joinToString("&")}"
     }
 
     fun wrapperHtml(embedUrl: String): String = """

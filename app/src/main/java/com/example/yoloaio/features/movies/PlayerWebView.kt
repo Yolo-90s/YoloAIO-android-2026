@@ -60,13 +60,17 @@ class FullScreenWebChromeClient(
 }
 
 /**
- * Builds a WebView that loads the Vidking embed URL directly (no iframe wrapper).
- * Direct loading sidesteps the SurfaceView/compositing issues that affect inline
- * <video> elements rendered inside iframes inside a Compose AndroidView.
+ * Builds a WebView that loads the embed player's URL directly (no iframe
+ * wrapper). Direct loading sidesteps the SurfaceView/compositing issues
+ * that affect inline <video> elements rendered inside iframes inside a
+ * Compose AndroidView.
  *
- * Progress tracking is restored by injecting a JS hook on every page load that
- * attaches event listeners (pause/play/ended/seeked/timeupdate) to whatever
- * <video> element Vidking creates, then forwards them to AndroidBridge.
+ * Progress tracking is restored by injecting a JS hook on every page load
+ * that attaches event listeners (pause/play/ended/seeked/timeupdate) to
+ * whatever <video> element the embed page creates, then forwards them to
+ * AndroidBridge. This is provider-agnostic by design — it doesn't depend
+ * on any particular embed's own postMessage format, so swapping providers
+ * (see MovieEmbedPlayer) never requires touching this file.
  */
 @SuppressLint("SetJavaScriptEnabled")
 fun createPlayerWebView(

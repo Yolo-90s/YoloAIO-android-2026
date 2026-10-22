@@ -41,13 +41,13 @@ fun MoviePlayerScreen(movieId: String, onBack: () -> Unit) {
         return
     }
 
-    // Always start from 0 — we no longer pass a `?progress=` param to Vidking.
-    // The seek-on-autoplay path is what was getting the HLS decoder stuck on
-    // this device; cold-start playback buffers cleanly. Progress is still
-    // saved to Firestore in handleMoviePlayerEvent for future use (history,
-    // analytics), it's just no longer used to resume.
+    // Always start from 0 — we no longer pass a start-time param to the
+    // embed player. The seek-on-autoplay path is what was getting the HLS
+    // decoder stuck on this device; cold-start playback buffers cleanly.
+    // Progress is still saved to Firestore in handleMoviePlayerEvent for
+    // future use (history, analytics), it's just no longer used to resume.
     val embedUrl = remember(movieId) {
-        VidkingPlayer.movieEmbedUrl(
+        MovieEmbedPlayer.movieEmbedUrl(
             tmdbId = movieId,
             primaryColorHex = "B85AC1",
             autoPlay = true,
@@ -64,9 +64,9 @@ fun MoviePlayerScreen(movieId: String, onBack: () -> Unit) {
         onBack = onBack,
         actions = {
             // Cast routes the user to system Cast Settings (the only
-            // viable path on Android since Vidking gives us an iframe,
-            // not a raw stream URL). PlayerCastButton wraps that intent
-            // with a short explanation dialog.
+            // viable path on Android since the embed player gives us an
+            // iframe, not a raw stream URL). PlayerCastButton wraps that
+            // intent with a short explanation dialog.
             PlayerCastButton()
         }
     ) { padding ->

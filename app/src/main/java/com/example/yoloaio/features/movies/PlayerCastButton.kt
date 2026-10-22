@@ -34,15 +34,15 @@ import androidx.compose.ui.unit.dp
 /**
  * Cast button shown in the Movie/TV player TopBar.
  *
- * Honest UX note: the player is a Vidking WebView, so the underlying
- * HLS stream URL isn't exposed to us. That means we can't push playback
- * directly to a Chromecast — the Cast SDK's `loadMedia()` needs a real
- * stream URL.
+ * Honest UX note: the player is an embed-provider WebView (see
+ * MovieEmbedPlayer), so the underlying HLS stream URL isn't exposed to
+ * us. That means we can't push playback directly to a Chromecast — the
+ * Cast SDK's `loadMedia()` needs a real stream URL.
  *
  * What we CAN do on Android: route the user to the system **Cast
  * Settings** screen, which lets them pick a Chromecast and start
  * **screen mirroring** of the whole device. Everything they see — the
- * Vidking iframe included — gets mirrored to the TV.
+ * player iframe included — gets mirrored to the TV.
  *
  * The dialog before the redirect explains this so users don't tap the
  * Cast icon expecting normal app casting and end up confused at the

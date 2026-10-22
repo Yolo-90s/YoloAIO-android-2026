@@ -50,7 +50,7 @@ fun TvPlayerScreen(
 
     // Always start from 0 — see MoviePlayerScreen for the why.
     val embedUrl = remember(tvId, season, episode) {
-        VidkingPlayer.tvEmbedUrl(
+        MovieEmbedPlayer.tvEmbedUrl(
             tmdbId = tvId,
             season = season,
             episode = episode,
