@@ -33,8 +33,8 @@ android {
         applicationId = "com.example.yoloaio"
         minSdk = 24
         targetSdk = 36
-        versionCode = 36
-        versionName = "1.16.0"
+        versionCode = 37
+        versionName = "1.16.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
