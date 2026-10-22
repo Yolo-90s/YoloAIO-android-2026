@@ -139,6 +139,23 @@ class MusicPlayer private constructor(private val context: Context) {
         attachEffectsIfNeeded()
         prepareJob = scope.launch {
             try {
+                // Cast can't reach a file sitting in this device's private
+                // storage, so a downloaded track only short-circuits straight
+                // to local playback when nothing's cast-connected; otherwise
+                // fall through to resolving a real streamable URL below.
+                val cast = CastManager.get(context)
+                val castActive = cast.isInitialized && cast.isConnected
+                val downloadedFile = if (!castActive) {
+                    DownloadedTracksStore.get(context).localFileFor(track.id)
+                } else null
+
+                if (downloadedFile != null) {
+                    player.reset()
+                    player.setDataSource(downloadedFile.absolutePath)
+                    player.prepareAsync()
+                    return@launch
+                }
+
                 val rawUrl = resolveStreamUrl?.invoke(track)
                 if (rawUrl.isNullOrBlank()) {
                     isLoading = false
@@ -158,8 +175,7 @@ class MusicPlayer private constructor(private val context: Context) {
                 // remote receiver instead of starting local playback. We still
                 // surface the track in our UI as "now playing" so the user
                 // can prev/next/pause from our controls.
-                val cast = CastManager.get(context)
-                if (cast.isInitialized && cast.isConnected) {
+                if (castActive) {
                     val sent = cast.loadAudio(
                         streamUrl = url,
                         title = track.title,

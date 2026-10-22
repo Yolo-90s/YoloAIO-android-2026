@@ -53,6 +53,9 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -127,7 +130,8 @@ private enum class MusicTab(val label: String, val icon: ImageVector) {
     Songs("Songs", Icons.Rounded.MusicNote),
     Albums("Albums", Icons.Rounded.Album),
     Playlists("Playlists", Icons.Rounded.PlaylistPlay),
-    Favorites("Favorites", Icons.Rounded.Favorite)
+    Favorites("Favorites", Icons.Rounded.Favorite),
+    Downloads("Downloads", Icons.Rounded.DownloadDone)
 }
 
 private sealed interface TabContent<out T> {
@@ -151,6 +155,11 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
     val favRepo = remember { FavoriteTracksRepository() }
     val favorites by favRepo.observeFavorites().collectAsState(initial = emptyList())
     val favoriteIds = remember(favorites) { favorites.map { it.trackId }.toSet() }
+
+    val downloadsStore = remember { DownloadedTracksStore.get(context) }
+    val downloads by downloadsStore.tracks.collectAsState()
+    val downloadedIds = remember(downloads) { downloads.map { it.trackId }.toSet() }
+    val downloadProgress by TrackDownloader.progress.collectAsState()
 
     var tab by remember { mutableStateOf(MusicTab.Songs) }
     var query by remember { mutableStateOf("") }
@@ -333,6 +342,14 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
         }
     }
 
+    // Same idea for Downloads — MusicPlayer.startTrack() already prefers the
+    // local file over this resolver when one exists, so it's only a fallback.
+    LaunchedEffect(downloads, tab) {
+        if (tab == MusicTab.Downloads) {
+            player.bind(downloads.map { it.toTrack() }) { it.streamUrl }
+        }
+    }
+
     BackHandler(enabled = playerExpanded) { playerExpanded = false }
 
     FeatureScaffold(
@@ -348,7 +365,7 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
             Column(modifier = Modifier.fillMaxSize()) {
                 MusicTabBar(selected = tab, onSelect = { tab = it })
 
-                if (tab != MusicTab.Favorites) {
+                if (tab != MusicTab.Favorites && tab != MusicTab.Downloads) {
                     SearchBar(
                         query = query,
                         onQueryChange = { query = it },
@@ -363,6 +380,8 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
                             currentTrackId = player.current?.id,
                             isPlaying = player.isPlaying,
                             favoriteIds = favoriteIds,
+                            downloadedIds = downloadedIds,
+                            downloadProgress = downloadProgress,
                             playNextCount = player.playNext.size,
                             bottomInset = if (player.current != null) 96.dp else 12.dp,
                             listState = songsListState,
@@ -376,6 +395,12 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
                                 }
                             },
                             onPlayNext = { player.addToPlayNext(it) },
+                            onDownload = { track ->
+                                scope.launch { TrackDownloader.download(context, track) }
+                            },
+                            onRemoveDownload = { trackId ->
+                                scope.launch { downloadsStore.remove(trackId) }
+                            },
                             onRetry = { reloadKey++ }
                         )
 
@@ -411,6 +436,17 @@ fun MusicScreen(onBack: () -> Unit, onOpenSettings: () -> Unit) {
                             onPlay = { player.play(it) },
                             onUnfavorite = { trackId ->
                                 scope.launch { favRepo.remove(trackId) }
+                            }
+                        )
+
+                        MusicTab.Downloads -> DownloadsView(
+                            downloads = downloads,
+                            currentTrackId = player.current?.id,
+                            isPlaying = player.isPlaying,
+                            bottomInset = if (player.current != null) 96.dp else 12.dp,
+                            onPlay = { player.play(it) },
+                            onRemove = { trackId ->
+                                scope.launch { downloadsStore.remove(trackId) }
                             }
                         )
                     }
@@ -497,6 +533,8 @@ private fun SongsView(
     currentTrackId: String?,
     isPlaying: Boolean,
     favoriteIds: Set<String>,
+    downloadedIds: Set<String>,
+    downloadProgress: Map<String, DownloadState>,
     playNextCount: Int,
     bottomInset: androidx.compose.ui.unit.Dp,
     listState: LazyListState,
@@ -505,6 +543,8 @@ private fun SongsView(
     onPlay: (SaavnTrack) -> Unit,
     onFavoriteToggle: (SaavnTrack) -> Unit,
     onPlayNext: (SaavnTrack) -> Unit,
+    onDownload: (SaavnTrack) -> Unit,
+    onRemoveDownload: (String) -> Unit,
     onRetry: () -> Unit
 ) {
     when (state) {
@@ -525,9 +565,13 @@ private fun SongsView(
                             isCurrent = currentTrackId == track.id,
                             isPlayingNow = currentTrackId == track.id && isPlaying,
                             isFavorited = track.id in favoriteIds,
+                            isDownloaded = track.id in downloadedIds,
+                            downloadState = downloadProgress[track.id],
                             onClick = { onPlay(track) },
                             onFavoriteToggle = { onFavoriteToggle(track) },
-                            onPlayNext = { onPlayNext(track) }
+                            onPlayNext = { onPlayNext(track) },
+                            onDownload = { onDownload(track) },
+                            onRemoveDownload = { onRemoveDownload(track.id) }
                         )
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 76.dp),
@@ -581,9 +625,13 @@ private fun TrackRow(
     isCurrent: Boolean,
     isPlayingNow: Boolean,
     isFavorited: Boolean,
+    isDownloaded: Boolean,
+    downloadState: DownloadState?,
     onClick: () -> Unit,
     onFavoriteToggle: () -> Unit,
-    onPlayNext: () -> Unit
+    onPlayNext: () -> Unit,
+    onDownload: () -> Unit,
+    onRemoveDownload: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Row(
@@ -624,6 +672,43 @@ private fun TrackRow(
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+            // Small at-a-glance offline-status badge — doesn't need the menu
+            // open to see what's already downloaded or mid-download.
+            if (downloadState is DownloadState.Downloading) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(3.dp)
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        progress = { downloadState.percent / 100f },
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(10.dp),
+                        color = Color.White
+                    )
+                }
+            } else if (isDownloaded) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(3.dp)
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.DownloadDone,
+                        contentDescription = "Downloaded for offline",
+                        tint = Color.White,
+                        modifier = Modifier.size(11.dp)
                     )
                 }
             }
@@ -675,6 +760,31 @@ private fun TrackRow(
                         menuOpen = false
                     }
                 )
+                if (isDownloaded) {
+                    DropdownMenuItem(
+                        text = { Text("Remove download") },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.Delete, contentDescription = null)
+                        },
+                        onClick = {
+                            onRemoveDownload()
+                            menuOpen = false
+                        }
+                    )
+                } else {
+                    val downloading = downloadState is DownloadState.Downloading
+                    DropdownMenuItem(
+                        text = { Text(if (downloading) "Downloading…" else "Download") },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.Download, contentDescription = null)
+                        },
+                        enabled = !downloading,
+                        onClick = {
+                            onDownload()
+                            menuOpen = false
+                        }
+                    )
+                }
             }
         }
     }
@@ -1039,6 +1149,153 @@ private fun FavoriteRow(
             )
         }
     }
+}
+
+// =========================================================================
+// Downloads view
+// =========================================================================
+
+@Composable
+private fun DownloadsView(
+    downloads: List<DownloadedTrack>,
+    currentTrackId: String?,
+    isPlaying: Boolean,
+    bottomInset: androidx.compose.ui.unit.Dp,
+    onPlay: (SaavnTrack) -> Unit,
+    onRemove: (String) -> Unit
+) {
+    if (downloads.isEmpty()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                Icons.Rounded.DownloadDone,
+                contentDescription = null,
+                modifier = Modifier.size(56.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "No downloads yet",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Use the ⋮ menu on any track in Songs to save it for offline play.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = bottomInset)
+    ) {
+        items(downloads, key = { it.trackId }) { entry ->
+            val track = remember(entry.id) { entry.toTrack() }
+            DownloadRow(
+                track = track,
+                fileSizeBytes = entry.fileSizeBytes,
+                isPlayingNow = currentTrackId == entry.trackId && isPlaying,
+                isCurrent = currentTrackId == entry.trackId,
+                onClick = { onPlay(track) },
+                onRemove = { onRemove(entry.trackId) }
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 76.dp),
+                color = Color.White.copy(alpha = 0.08f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadRow(
+    track: SaavnTrack,
+    fileSizeBytes: Long,
+    isPlayingNow: Boolean,
+    isCurrent: Boolean,
+    onClick: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Brush.linearGradient(gradientFor(track.id))),
+            contentAlignment = Alignment.Center
+        ) {
+            val art = track.artworkUrlSmall ?: track.artworkUrlLarge
+            if (art != null) {
+                AsyncImage(
+                    model = art,
+                    contentDescription = track.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White)
+            }
+            if (isPlayingNow) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                track.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                color = if (isCurrent) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1
+            )
+            Text(
+                "${track.artist} · ${formatFileSize(fileSizeBytes)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
+        IconButton(onClick = onRemove) {
+            Icon(
+                Icons.Rounded.Delete,
+                contentDescription = "Remove download",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "0 MB"
+    val mb = bytes / (1024.0 * 1024.0)
+    return "%.1f MB".format(mb)
 }
 
 // =========================================================================
