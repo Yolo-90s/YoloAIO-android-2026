@@ -10,17 +10,28 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import com.example.yoloaio.ui.components.FeatureScaffold
 import kotlinx.coroutines.launch
 
@@ -58,6 +69,7 @@ fun MoviePlayerScreen(movieId: String, onBack: () -> Unit) {
     val lastSavedAt = remember { MovieLongRef(0L) }
     val webView = remember { MovieRef<WebView>() }
     val context = LocalContext.current
+    var loadState by remember(movieId) { mutableStateOf<PlayerLoadState>(PlayerLoadState.Loading) }
 
     FeatureScaffold(
         title = title,
@@ -70,44 +82,76 @@ fun MoviePlayerScreen(movieId: String, onBack: () -> Unit) {
             PlayerCastButton()
         }
     ) { padding ->
-        AndroidView(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            factory = { ctx ->
-                createPlayerWebView(
-                    context = ctx,
-                    url = embedUrl,
-                    progressContextId = movieId,
-                    mediaType = "movie",
-                    onPlayerEvent = { json ->
-                        scope.launch {
-                            handleMoviePlayerEvent(
-                                json = json,
-                                tmdbId = movieId,
-                                repo = progressRepo,
-                                lastSavedAt = lastSavedAt
-                            )
-                        }
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    createPlayerWebView(
+                        context = ctx,
+                        url = embedUrl,
+                        progressContextId = movieId,
+                        mediaType = "movie",
+                        onPlayerEvent = { json ->
+                            scope.launch {
+                                handleMoviePlayerEvent(
+                                    json = json,
+                                    tmdbId = movieId,
+                                    repo = progressRepo,
+                                    lastSavedAt = lastSavedAt
+                                )
+                            }
+                        },
+                        onLoadStateChanged = { loadState = it }
+                    ).also { webView.value = it }
+                },
+                // Detach from parent BEFORE destroy(), wrapped in runCatching, to
+                // avoid the "destroy called while still attached to window" warning
+                // that can leave the underlying SurfaceView in a half-released
+                // state on some devices (notably Vivo / Snapdragon Codec2).
+                onRelease = { wv ->
+                    runCatching {
+                        wv.stopLoading()
+                        wv.loadUrl("about:blank")
+                        wv.onPause()
+                        wv.removeJavascriptInterface("AndroidBridge")
+                        (wv.parent as? ViewGroup)?.removeView(wv)
+                        wv.destroy()
                     }
-                ).also { webView.value = it }
-            },
-            // Detach from parent BEFORE destroy(), wrapped in runCatching, to
-            // avoid the "destroy called while still attached to window" warning
-            // that can leave the underlying SurfaceView in a half-released
-            // state on some devices (notably Vivo / Snapdragon Codec2).
-            onRelease = { wv ->
-                runCatching {
-                    wv.stopLoading()
-                    wv.loadUrl("about:blank")
-                    wv.onPause()
-                    wv.removeJavascriptInterface("AndroidBridge")
-                    (wv.parent as? ViewGroup)?.removeView(wv)
-                    wv.destroy()
+                    if (webView.value === wv) webView.value = null
                 }
-                if (webView.value === wv) webView.value = null
+            )
+
+            // Previously a load failure just left a black WebView with zero
+            // feedback. Now: a spinner while loading, and a clear error +
+            // Retry when the main frame fails (e.g. the embed host being
+            // unreachable on this network).
+            when (val state = loadState) {
+                PlayerLoadState.Loading -> PlayerOverlay {
+                    CircularProgressIndicator(color = Color.White)
+                }
+                is PlayerLoadState.Error -> PlayerOverlay {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "Couldn't load the player",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            state.message,
+                            color = Color.White.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = {
+                            loadState = PlayerLoadState.Loading
+                            webView.value?.loadUrl(embedUrl)
+                        }) { Text("Retry") }
+                    }
+                }
+                PlayerLoadState.Ready -> Unit
             }
-        )
+        }
     }
 }
 

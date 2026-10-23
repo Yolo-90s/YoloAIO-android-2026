@@ -6,20 +6,30 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.yoloaio.ui.components.FeatureScaffold
 import kotlinx.coroutines.launch
@@ -65,6 +75,7 @@ fun TvPlayerScreen(
     val lastSavedAt = remember { TvLongRef(0L) }
     val webView = remember { TvRef<WebView>() }
     val context = LocalContext.current
+    var loadState by remember(watchKey) { mutableStateOf<PlayerLoadState>(PlayerLoadState.Loading) }
 
     FeatureScaffold(
         title = title,
@@ -76,40 +87,68 @@ fun TvPlayerScreen(
             PlayerCastButton()
         }
     ) { padding ->
-        AndroidView(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            factory = { ctx ->
-                createPlayerWebView(
-                    context = ctx,
-                    url = embedUrl,
-                    progressContextId = watchKey,
-                    mediaType = "tv",
-                    onPlayerEvent = { json ->
-                        scope.launch {
-                            handleTvPlayerEvent(
-                                json = json,
-                                watchKey = watchKey,
-                                repo = progressRepo,
-                                lastSavedAt = lastSavedAt
-                            )
-                        }
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    createPlayerWebView(
+                        context = ctx,
+                        url = embedUrl,
+                        progressContextId = watchKey,
+                        mediaType = "tv",
+                        onPlayerEvent = { json ->
+                            scope.launch {
+                                handleTvPlayerEvent(
+                                    json = json,
+                                    watchKey = watchKey,
+                                    repo = progressRepo,
+                                    lastSavedAt = lastSavedAt
+                                )
+                            }
+                        },
+                        onLoadStateChanged = { loadState = it }
+                    ).also { webView.value = it }
+                },
+                onRelease = { wv ->
+                    runCatching {
+                        wv.stopLoading()
+                        wv.loadUrl("about:blank")
+                        wv.onPause()
+                        wv.removeJavascriptInterface("AndroidBridge")
+                        (wv.parent as? ViewGroup)?.removeView(wv)
+                        wv.destroy()
                     }
-                ).also { webView.value = it }
-            },
-            onRelease = { wv ->
-                runCatching {
-                    wv.stopLoading()
-                    wv.loadUrl("about:blank")
-                    wv.onPause()
-                    wv.removeJavascriptInterface("AndroidBridge")
-                    (wv.parent as? ViewGroup)?.removeView(wv)
-                    wv.destroy()
+                    if (webView.value === wv) webView.value = null
                 }
-                if (webView.value === wv) webView.value = null
+            )
+
+            when (val state = loadState) {
+                PlayerLoadState.Loading -> PlayerOverlay {
+                    CircularProgressIndicator(color = Color.White)
+                }
+                is PlayerLoadState.Error -> PlayerOverlay {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "Couldn't load the player",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            state.message,
+                            color = Color.White.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = {
+                            loadState = PlayerLoadState.Loading
+                            webView.value?.loadUrl(embedUrl)
+                        }) { Text("Retry") }
+                    }
+                }
+                PlayerLoadState.Ready -> Unit
             }
-        )
+        }
     }
 }
 

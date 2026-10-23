@@ -4,15 +4,48 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
+import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+
+/** Surfaced to Compose so the player screen can show a spinner/error
+ *  overlay instead of a silent black WebView when a load fails. */
+sealed interface PlayerLoadState {
+    data object Loading : PlayerLoadState
+    data object Ready : PlayerLoadState
+    data class Error(val message: String) : PlayerLoadState
+}
+
+/** Shared full-bleed overlay for the Loading/Error states above — used by
+ *  both MoviePlayerScreen and TvPlayerScreen so they stay in sync. */
+@Composable
+fun PlayerOverlay(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
+}
 
 class FullScreenWebChromeClient(
     private val activity: Activity
@@ -78,7 +111,8 @@ fun createPlayerWebView(
     url: String,
     progressContextId: String,
     mediaType: String,
-    onPlayerEvent: (String) -> Unit
+    onPlayerEvent: (String) -> Unit,
+    onLoadStateChanged: (PlayerLoadState) -> Unit = {}
 ): WebView = WebView(context).apply {
     setBackgroundColor(android.graphics.Color.BLACK)
     setLayerType(View.LAYER_TYPE_HARDWARE, null)
@@ -95,11 +129,66 @@ fun createPlayerWebView(
 
     addJavascriptInterface(PlayerJsBridge(onPlayerEvent), "AndroidBridge")
 
+    // Free ad-supported embeds like this one commonly bundle popunder/redirect
+    // ad networks (e.g. intellipopup.com-style scripts) that try to hijack the
+    // whole page via a top-level navigation. Locking navigation to the embed's
+    // own host — and anything our own loadUrl() calls, which never go through
+    // shouldOverrideUrlLoading at all — stops that without needing to
+    // maintain a blocklist of every ad domain that might attempt it.
+    val allowedHost = Uri.parse(url).host
+
     val hookScript = progressHookScript(progressContextId, mediaType)
     webViewClient = object : WebViewClient() {
+        override fun shouldOverrideUrlLoading(
+            view: WebView?,
+            request: WebResourceRequest?
+        ): Boolean {
+            if (request?.isForMainFrame != true) return false
+            val requestHost = request.url?.host ?: return false
+            val isAllowed = allowedHost != null &&
+                (requestHost == allowedHost || requestHost.endsWith(".$allowedHost"))
+            return !isAllowed
+        }
+
+        override fun onPageStarted(view: WebView?, pageUrl: String?, favicon: android.graphics.Bitmap?) {
+            super.onPageStarted(view, pageUrl, favicon)
+            onLoadStateChanged(PlayerLoadState.Loading)
+        }
+
         override fun onPageFinished(view: WebView?, finishedUrl: String?) {
             super.onPageFinished(view, finishedUrl)
             view?.evaluateJavascript(hookScript, null)
+            onLoadStateChanged(PlayerLoadState.Ready)
+        }
+
+        // Previously silent: a failed load just left a black WebView with no
+        // feedback at all. Only the main-frame request counts as a real
+        // failure — sub-resources (ads, trackers, analytics beacons the
+        // embed page pulls in) fail constantly without the player itself
+        // being broken, and would otherwise trigger false-positive errors.
+        override fun onReceivedError(
+            view: WebView?,
+            request: WebResourceRequest?,
+            error: WebResourceError?
+        ) {
+            super.onReceivedError(view, request, error)
+            if (request?.isForMainFrame == true) {
+                onLoadStateChanged(
+                    PlayerLoadState.Error(error?.description?.toString() ?: "Couldn't load the player")
+                )
+            }
+        }
+
+        override fun onReceivedHttpError(
+            view: WebView?,
+            request: WebResourceRequest?,
+            errorResponse: WebResourceResponse?
+        ) {
+            super.onReceivedHttpError(view, request, errorResponse)
+            val status = errorResponse?.statusCode ?: 0
+            if (request?.isForMainFrame == true && status >= 400) {
+                onLoadStateChanged(PlayerLoadState.Error("Server error ($status)"))
+            }
         }
     }
 
