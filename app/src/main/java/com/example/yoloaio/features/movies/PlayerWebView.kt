@@ -31,6 +31,11 @@ sealed interface PlayerLoadState {
     data object Loading : PlayerLoadState
     data object Ready : PlayerLoadState
     data class Error(val message: String) : PlayerLoadState
+
+    /** The page loaded fine (no navigation error) but no play/timeupdate
+     *  event arrived within the stall window — the screen-level code
+     *  watches for this and reacts (offer the vidsrc.to fallback). */
+    data object Stalled : PlayerLoadState
 }
 
 /** Shared full-bleed overlay for the Loading/Error states above — used by

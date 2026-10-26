@@ -20,6 +20,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,7 +33,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.yoloaio.ui.components.FeatureScaffold
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+/** See MoviePlayerScreen — same stall-timeout rationale. */
+private const val STALL_TIMEOUT_MS = 15_000L
 
 @Composable
 fun TvPlayerScreen(
@@ -59,7 +64,7 @@ fun TvPlayerScreen(
     }
 
     // Always start from 0 — see MoviePlayerScreen for the why.
-    val embedUrl = remember(tvId, season, episode) {
+    val primaryEmbedUrl = remember(tvId, season, episode) {
         MovieEmbedPlayer.tvEmbedUrl(
             tmdbId = tvId,
             season = season,
@@ -71,11 +76,26 @@ fun TvPlayerScreen(
             progressSeconds = null
         )
     }
+    val fallbackEmbedUrl = remember(tvId, season, episode) {
+        MovieEmbedPlayer.fallbackTvEmbedUrl(tmdbId = tvId, season = season, episode = episode)
+    }
 
     val lastSavedAt = remember { TvLongRef(0L) }
     val webView = remember { TvRef<WebView>() }
     val context = LocalContext.current
     var loadState by remember(watchKey) { mutableStateOf<PlayerLoadState>(PlayerLoadState.Loading) }
+    var usingFallback by remember(watchKey) { mutableStateOf(false) }
+    var hasPlaybackStarted by remember(watchKey, usingFallback) { mutableStateOf(false) }
+    val embedUrl = if (usingFallback) fallbackEmbedUrl else primaryEmbedUrl
+
+    LaunchedEffect(loadState, usingFallback) {
+        if (loadState == PlayerLoadState.Ready) {
+            delay(STALL_TIMEOUT_MS)
+            if (!hasPlaybackStarted) {
+                loadState = PlayerLoadState.Stalled
+            }
+        }
+    }
 
     FeatureScaffold(
         title = title,
@@ -97,6 +117,10 @@ fun TvPlayerScreen(
                         progressContextId = watchKey,
                         mediaType = "tv",
                         onPlayerEvent = { json ->
+                            val parsed = PlayerEventParser.parse(json)
+                            if (parsed != null && (parsed.name == "play" || parsed.name == "timeupdate")) {
+                                hasPlaybackStarted = true
+                            }
                             scope.launch {
                                 handleTvPlayerEvent(
                                     json = json,
@@ -141,9 +165,33 @@ fun TvPlayerScreen(
                         )
                         Spacer(Modifier.height(16.dp))
                         Button(onClick = {
+                            hasPlaybackStarted = false
                             loadState = PlayerLoadState.Loading
                             webView.value?.loadUrl(embedUrl)
                         }) { Text("Retry") }
+                    }
+                }
+                PlayerLoadState.Stalled -> PlayerOverlay {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "This title isn't playing on this source",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            if (usingFallback) "Still not available right now — try again later."
+                            else "Let's try another source.",
+                            color = Color.White.copy(alpha = 0.7f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = {
+                            usingFallback = true
+                            hasPlaybackStarted = false
+                            loadState = PlayerLoadState.Loading
+                            webView.value?.loadUrl(fallbackEmbedUrl)
+                        }) { Text(if (usingFallback) "Retry" else "Try another source") }
                     }
                 }
                 PlayerLoadState.Ready -> Unit
