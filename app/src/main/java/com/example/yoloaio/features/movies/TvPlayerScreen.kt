@@ -64,7 +64,7 @@ fun TvPlayerScreen(
     }
 
     // Always start from 0 — see MoviePlayerScreen for the why.
-    val primaryEmbedUrl = remember(tvId, season, episode) {
+    val embedUrl = remember(tvId, season, episode) {
         MovieEmbedPlayer.tvEmbedUrl(
             tmdbId = tvId,
             season = season,
@@ -76,19 +76,14 @@ fun TvPlayerScreen(
             progressSeconds = null
         )
     }
-    val fallbackEmbedUrl = remember(tvId, season, episode) {
-        MovieEmbedPlayer.fallbackTvEmbedUrl(tmdbId = tvId, season = season, episode = episode)
-    }
 
     val lastSavedAt = remember { TvLongRef(0L) }
     val webView = remember { TvRef<WebView>() }
     val context = LocalContext.current
     var loadState by remember(watchKey) { mutableStateOf<PlayerLoadState>(PlayerLoadState.Loading) }
-    var usingFallback by remember(watchKey) { mutableStateOf(false) }
-    var hasPlaybackStarted by remember(watchKey, usingFallback) { mutableStateOf(false) }
-    val embedUrl = if (usingFallback) fallbackEmbedUrl else primaryEmbedUrl
+    var hasPlaybackStarted by remember(watchKey) { mutableStateOf(false) }
 
-    LaunchedEffect(loadState, usingFallback) {
+    LaunchedEffect(loadState) {
         if (loadState == PlayerLoadState.Ready) {
             delay(STALL_TIMEOUT_MS)
             if (!hasPlaybackStarted) {
@@ -174,24 +169,22 @@ fun TvPlayerScreen(
                 PlayerLoadState.Stalled -> PlayerOverlay {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "This title isn't playing on this source",
+                            "This title isn't available right now",
                             color = Color.White,
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            if (usingFallback) "Still not available right now — try again later."
-                            else "Let's try another source.",
+                            "It may just be a temporary gap in this source — try again, or come back later.",
                             color = Color.White.copy(alpha = 0.7f),
                             style = MaterialTheme.typography.bodySmall
                         )
                         Spacer(Modifier.height(16.dp))
                         Button(onClick = {
-                            usingFallback = true
                             hasPlaybackStarted = false
                             loadState = PlayerLoadState.Loading
-                            webView.value?.loadUrl(fallbackEmbedUrl)
-                        }) { Text(if (usingFallback) "Retry" else "Try another source") }
+                            webView.value?.loadUrl(embedUrl)
+                        }) { Text("Retry") }
                     }
                 }
                 PlayerLoadState.Ready -> Unit

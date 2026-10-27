@@ -64,7 +64,7 @@ fun MoviePlayerScreen(movieId: String, onBack: () -> Unit) {
     // decoder stuck on this device; cold-start playback buffers cleanly.
     // Progress is still saved to Firestore in handleMoviePlayerEvent for
     // future use (history, analytics), it's just no longer used to resume.
-    val primaryEmbedUrl = remember(movieId) {
+    val embedUrl = remember(movieId) {
         MovieEmbedPlayer.movieEmbedUrl(
             tmdbId = movieId,
             primaryColorHex = "B85AC1",
@@ -72,21 +72,18 @@ fun MoviePlayerScreen(movieId: String, onBack: () -> Unit) {
             progressSeconds = null
         )
     }
-    val fallbackEmbedUrl = remember(movieId) { MovieEmbedPlayer.fallbackMovieEmbedUrl(movieId) }
 
     val lastSavedAt = remember { MovieLongRef(0L) }
     val webView = remember { MovieRef<WebView>() }
     val context = LocalContext.current
     var loadState by remember(movieId) { mutableStateOf<PlayerLoadState>(PlayerLoadState.Loading) }
-    var usingFallback by remember(movieId) { mutableStateOf(false) }
-    var hasPlaybackStarted by remember(movieId, usingFallback) { mutableStateOf(false) }
-    val embedUrl = if (usingFallback) fallbackEmbedUrl else primaryEmbedUrl
+    var hasPlaybackStarted by remember(movieId) { mutableStateOf(false) }
 
     // The embed page loading (Ready) doesn't mean the video actually
     // started — vidlink.pro can load its page fine for a title it has no
-    // working source for. If nothing plays within the timeout, surface the
-    // vidsrc.to fallback instead of leaving a silent backdrop image forever.
-    LaunchedEffect(loadState, usingFallback) {
+    // working source for. If nothing plays within the timeout, say so
+    // clearly instead of leaving a silent backdrop image forever.
+    LaunchedEffect(loadState) {
         if (loadState == PlayerLoadState.Ready) {
             delay(STALL_TIMEOUT_MS)
             if (!hasPlaybackStarted) {
@@ -181,27 +178,22 @@ fun MoviePlayerScreen(movieId: String, onBack: () -> Unit) {
                 PlayerLoadState.Stalled -> PlayerOverlay {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "This title isn't playing on this source",
+                            "This title isn't available right now",
                             color = Color.White,
                             style = MaterialTheme.typography.titleMedium
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            if (usingFallback) "Still not available right now — try again later."
-                            else "Let's try another source.",
+                            "It may just be a temporary gap in this source — try again, or come back later.",
                             color = Color.White.copy(alpha = 0.7f),
                             style = MaterialTheme.typography.bodySmall
                         )
                         Spacer(Modifier.height(16.dp))
                         Button(onClick = {
-                            // Same action either way — switch to (or reload) the
-                            // fallback. The label below just distinguishes a first
-                            // switch from a retry of the fallback itself.
-                            usingFallback = true
                             hasPlaybackStarted = false
                             loadState = PlayerLoadState.Loading
-                            webView.value?.loadUrl(fallbackEmbedUrl)
-                        }) { Text(if (usingFallback) "Retry" else "Try another source") }
+                            webView.value?.loadUrl(embedUrl)
+                        }) { Text("Retry") }
                     }
                 }
                 PlayerLoadState.Ready -> Unit

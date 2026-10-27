@@ -20,17 +20,16 @@ import org.json.JSONObject
  * format — see PlayerWebView.kt's injected JS hook, which attaches directly
  * to the page's real <video> element regardless of which embed is loaded.
  *
- * [fallbackMovieEmbedUrl]/[fallbackTvEmbedUrl] point at vidsrc.to, used only
- * when vidlink.pro's page loads fine but never actually starts playback —
- * a per-title gap in its scraped source pool, not a dead provider (confirmed
- * by other titles playing fine on vidlink.pro the same day). No query
- * params are added for the fallback: vidsrc.to doesn't have independently
- * confirmed documentation for autoplay/color params, and guessing at ones
- * it might not support risks breaking the URL outright.
+ * No fallback provider: vidsrc.to was tried and confirmed ISP-blocked for
+ * at least one real tester (the domain didn't even resolve, not just the
+ * embed) — the well-known "vidsrc alternative" mirrors that turn up in
+ * search results are exactly the ones most likely to already be on a
+ * blocklist. A title with no working source on vidlink.pro is surfaced via
+ * PlayerLoadState.Stalled (see MoviePlayerScreen/TvPlayerScreen) with a
+ * plain retry, not a second provider we can't verify actually works.
  */
 object MovieEmbedPlayer {
     private const val BASE = "https://vidlink.pro"
-    private const val FALLBACK_BASE = "https://vidsrc.to/embed"
 
     fun movieEmbedUrl(
         tmdbId: String,
@@ -66,11 +65,6 @@ object MovieEmbedPlayer {
         }
         return "$BASE/tv/$tmdbId/$season/$episode?${params.joinToString("&")}"
     }
-
-    fun fallbackMovieEmbedUrl(tmdbId: String): String = "$FALLBACK_BASE/movie/$tmdbId"
-
-    fun fallbackTvEmbedUrl(tmdbId: String, season: Int, episode: Int): String =
-        "$FALLBACK_BASE/tv/$tmdbId/$season/$episode"
 
     fun wrapperHtml(embedUrl: String): String = """
 <!DOCTYPE html>
