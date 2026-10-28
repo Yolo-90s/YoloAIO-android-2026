@@ -141,7 +141,11 @@ fun TvPlayerScreen(
                 }
             )
 
-            when (val state = loadState) {
+            // The spinner stays up through Ready too, as long as no real
+            // play/timeupdate event has arrived yet — see MoviePlayerScreen.
+            if (loadState == PlayerLoadState.Ready && !hasPlaybackStarted) {
+                PlayerOverlay { CircularProgressIndicator(color = Color.White) }
+            } else when (val state = loadState) {
                 PlayerLoadState.Loading -> PlayerOverlay {
                     CircularProgressIndicator(color = Color.White)
                 }

@@ -150,7 +150,15 @@ fun MoviePlayerScreen(movieId: String, onBack: () -> Unit) {
             // feedback. Now: a spinner while loading, and a clear error +
             // Retry when the main frame fails (e.g. the embed host being
             // unreachable on this network).
-            when (val state = loadState) {
+            //
+            // The spinner stays up through Ready too, as long as no real
+            // play/timeupdate event has arrived yet — the page finishing
+            // navigation doesn't mean the video started, and without this
+            // users were seeing a blank screen for up to 15s between the
+            // initial spinner disappearing and the Stalled message showing.
+            if (loadState == PlayerLoadState.Ready && !hasPlaybackStarted) {
+                PlayerOverlay { CircularProgressIndicator(color = Color.White) }
+            } else when (val state = loadState) {
                 PlayerLoadState.Loading -> PlayerOverlay {
                     CircularProgressIndicator(color = Color.White)
                 }
